@@ -78,10 +78,7 @@
   .top { display: flex; align-items: center; gap: 16px; padding: 12px 18px; border-bottom: 1px solid var(--hair); flex: 0 0 auto; }
   .wordmark { font-family: "Instrument Serif", Georgia, "Times New Roman", serif; font-style: italic; font-size: 22px; letter-spacing: -.01em; line-height: 1; margin-right: 4px; }
   .wordmark small { font-family: "Instrument Sans", system-ui, sans-serif; font-style: normal; font-size: 11px; color: var(--muted); margin-left: 8px; letter-spacing: .04em; text-transform: uppercase; }
-  .seg { display: inline-flex; padding: 3px; border-radius: 10px; background: var(--control); gap: 2px; }
-  .seg button { border: 0; background: transparent; border-radius: 8px; padding: 6px 12px; color: var(--muted); cursor: pointer; font-weight: 500; }
-  .seg button[aria-pressed="true"] { background: var(--surface-solid); color: var(--ink); box-shadow: 0 1px 2px rgba(0, 0, 0, .08); }
-  .spacer { flex: 1; }
+    .spacer { flex: 1; }
   .btn { border: 0; border-radius: 8px; padding: 6px 11px; background: var(--control); color: var(--ink); cursor: pointer; font-weight: 500; }
   .btn:hover { background: var(--control-hover); }
   .btn.on { background: var(--accent-soft); color: var(--accent-ink); }
@@ -117,7 +114,6 @@
   .r2 { width: calc(var(--R) * 5.0 * var(--ring-sp)); height: calc(var(--R) * 5.0 * var(--ring-sp)); border-color: var(--ring-2); }
   .r3 { width: calc(var(--R) * 6.6 * var(--ring-sp)); height: calc(var(--R) * 6.6 * var(--ring-sp)); border-color: var(--ring-3); }
   .orb { width: calc(var(--R) * 2); height: calc(var(--R) * 2); overflow: hidden; box-shadow: var(--orb-outer); background: var(--orb-bg); }
-  .orb canvas.aur { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
   .liquid { position: absolute; inset: 0; border-radius: 50%; overflow: hidden; transform: translateZ(0); -webkit-transform: translateZ(0); isolation: isolate; }
   .liquid canvas { position: absolute; left: -35%; top: -35%; width: 170%; height: 170%; display: block; filter: blur(var(--liquid-blur)); -webkit-filter: blur(var(--liquid-blur)); }
   .gloss { position: absolute; inset: 0; width: 100%; height: 100%; display: block; pointer-events: none; }
@@ -180,11 +176,8 @@
 </style>
 
 <header class="top">
-  <div class="wordmark">Orb Studio<small>sync state</small></div>
-  <div class="seg" role="group" aria-label="Orb">
-    <button type="button" data-orb="aurora" aria-pressed="true">Aurora Bloom</button>
-    <button type="button" data-orb="liquid" aria-pressed="false">Liquid Gold</button>
-  </div>
+  <div class="wordmark">Orb Studio<small>Liquid Gold · sync state</small></div>
+
   <div class="spacer"></div>
   <button type="button" class="btn text" id="pause">Pause</button>
   <button type="button" class="btn text" id="reset">Reset</button>
@@ -198,9 +191,8 @@
         <div class="halo"></div>
         <div class="ring r3"></div><div class="ring r2"></div><div class="ring r1"></div>
         <div class="orb" id="orb">
-          <canvas class="aur" id="aur"></canvas>
-          <div class="liquid" id="liq" hidden><canvas id="lc"></canvas></div>
-          <canvas class="gloss" id="gloss" hidden></canvas>
+          <div class="liquid" id="liq"><canvas id="lc"></canvas></div>
+          <canvas class="gloss" id="gloss"></canvas>
           <div class="shade"></div>
         </div>
       </div>
@@ -208,7 +200,7 @@
     <div class="caption">iPhone preview · 390 × 844</div>
   </section>
   <aside class="panel" id="panel" aria-label="Controls">
-    <div class="panel-head"><h2 id="p-title">Aurora Bloom</h2><p id="p-desc"></p><div class="panel-actions"><button type="button" class="btn" id="p-pause">Pause</button><button type="button" class="btn" id="p-reset">Reset</button><button type="button" class="btn primary" id="p-close">Done</button></div></div>
+    <div class="panel-head"><h2 id="p-title">Liquid Gold</h2><p id="p-desc"></p><div class="panel-actions"><button type="button" class="btn" id="p-pause">Pause</button><button type="button" class="btn" id="p-reset">Reset</button><button type="button" class="btn primary" id="p-close">Done</button></div></div>
     <div class="panel-body" id="p-body"></div>
     <div class="panel-foot">Changes stay on this device. Copy settings and send them back to hand over a look.</div>
   </aside>
@@ -216,86 +208,6 @@
 <button type="button" class="btn primary fab" id="fab">Tune</button>
 <div class="toast" id="toast" role="status"></div>
 
-<script id="fs" type="x-shader/x-fragment">
-precision mediump float;
-uniform vec2  uRes;
-uniform float uPhase;
-uniform vec3  uHi, uCream, uMid, uEdge, uGold, uPeach, uLav;
-uniform float uPeriod, uAngle, uWarp, uUnd, uGoldAmt, uPeachAmt, uFringeAmt, uLavAmt;
-uniform float uLimb, uShadow, uSheen, uSpec, uRim, uDir;
-float hash(vec2 p){ p = fract(p * vec2(123.34, 345.45)); p += dot(p, p + 34.345); return fract(p.x * p.y); }
-float vnoise(vec2 p){
-  vec2 i = floor(p), f = fract(p);
-  vec2 u = f * f * (3.0 - 2.0 * f);
-  float a = hash(i), b = hash(i + vec2(1.0, 0.0)), c = hash(i + vec2(0.0, 1.0)), d = hash(i + vec2(1.0, 1.0));
-  return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
-}
-float fbm2(vec2 p){
-  const mat2 m = mat2(0.80, 0.60, -0.60, 0.80);
-  float v = 0.5 * vnoise(p);
-  p = m * p * 2.03 + 11.7;
-  v += 0.25 * vnoise(p);
-  return v / 0.75;
-}
-float lobe(float s, float c, float w){
-  float d = abs(fract(s - c + 0.5) - 0.5);
-  float t = clamp(d / w, 0.0, 1.0);
-  return 0.5 + 0.5 * cos(3.14159265 * t);
-}
-void main(){
-  vec2 p = (gl_FragCoord.xy * 2.0 - uRes) / min(uRes.x, uRes.y);
-  float r = length(p);
-  float px = 2.0 / min(uRes.x, uRes.y);
-  const float INV2PI = 0.15915494309;
-  float ph = uPhase * INV2PI;
-  float z = sqrt(max(0.0, 1.0 - r * r));
-  vec3  N = vec3(p, z);
-  vec3  Ld = normalize(vec3(-0.55, 0.62, 0.75));
-  float lam = dot(N, Ld) * 0.5 + 0.5;
-  vec2 ps = p / (0.62 + 0.38 * z);
-  float ca = cos(uAngle), sa = sin(uAngle);
-  float d1 = ps.x * ca + ps.y * sa;
-  float d2 = ps.x * sa - ps.y * ca;
-  vec2 o1 = vec2(cos(uPhase),       sin(uPhase))       * 0.42;
-  vec2 o2 = vec2(cos(uPhase + 2.4), sin(uPhase + 2.4)) * 0.36;
-  float w1 = fbm2(vec2(d2 * 0.55, d1 * 0.85) + o1);
-  float w2 = fbm2(vec2(d2 * 0.40, d1 * 0.60) * 1.7 + o2 + vec2(7.3, 2.1));
-  float und = uUnd * sin(d2 * 2.3 + uPhase + 1.2) + uUnd * 0.27 * sin(d2 * 4.1 - 2.0 * uPhase + 0.4);
-  float d1w = d1 + (w1 - 0.5) * uWarp + (w2 - 0.5) * uWarp * 0.22 + und;
-  float s = fract(d1w / uPeriod - 2.0 * ph * uDir);
-  float sheenA = 0.70 + 0.30 * fbm2(vec2(d2 * 0.9, d1 * 0.35) - o2 * 0.8 + vec2(3.3, 8.8));
-  float gold   = lobe(s, 0.30, 0.24) * sheenA;
-  float fringe = lobe(s, 0.535, 0.075) * (0.75 + 0.25 * sheenA);
-  float peach  = lobe(s, 0.79, 0.20) * (0.60 + 0.40 * sheenA);
-  float hue = fbm2(vec2(d2 * 0.5, d1 * 0.3) + o1 * 0.6 + vec2(11.0, 5.5));
-  vec3 goldCol  = mix(uGold, mix(uGold, uPeach, 0.45), smoothstep(0.35, 0.80, hue));
-  vec3 peachCol = mix(mix(uPeach, uGold, 0.30), mix(uPeach, uGold, 0.55), smoothstep(0.60, 0.25, hue));
-  float rh = length(p - vec2(-0.24, 0.36)) * 0.62;
-  vec3 col = mix(uHi, uCream, smoothstep(0.0, 0.30, rh));
-  col = mix(col, uMid, smoothstep(0.30, 0.68, rh) * 0.55);
-  col = mix(col, goldCol,  gold  * uGoldAmt);
-  col = mix(col, peachCol, peach * uPeachAmt);
-  col = mix(col, uHi, fringe * uFringeAmt);
-  float cool = smoothstep(0.05, 0.95, (p.x * 0.8 + p.y * 0.6) * 0.9 + 0.1);
-  float lav  = cool * (1.0 - gold) * (1.0 - fringe) * uLavAmt * (0.6 + 0.4 * w2);
-  col = mix(col, uLav, lav);
-  float fres = pow(smoothstep(0.30, 1.0, r), 1.5);
-  col = mix(col, uEdge, fres * uLimb);
-  col = mix(col, uGold, fres * uShadow * (1.0 - lam));
-  col = mix(col, uCream, max(lam - 0.5, 0.0) * 0.16);
-  vec3 H = normalize(vec3(-0.55, 0.62, 1.6));
-  float sh = pow(max(dot(N, H), 0.0), 5.0);
-  col = mix(col, uHi, sh * uSheen);
-  float spec = pow(max(dot(N, H), 0.0), 18.0);
-  col = mix(col, vec3(1.0), spec * uSpec);
-  float rim = smoothstep(1.0 - px * 2.8, 1.0 - px * 1.3, r) * (1.0 - smoothstep(1.0 - px * 1.3, 1.0, r));
-  col = mix(col, vec3(1.0), rim * uRim);
-  col += (hash(gl_FragCoord.xy) - 0.5) * (1.0 / 255.0);
-  col = clamp(col, 0.0, 1.0);
-  float a = 1.0 - smoothstep(1.0 - px * 1.5, 1.0 + px * 0.2, r);
-  gl_FragColor = vec4(col * a, a);
-}
-</script>
 
 <script>
 (function () {
@@ -360,85 +272,6 @@ void main(){
     rs.setProperty('--ring-3', rgba(p.ringColor, .24 * p.ringAlpha));
     rs.setProperty('--ring-sp', p.ringSpacing);
     rs.setProperty('--rings-display', p.ringsOn ? 'block' : 'none');
-  }
-
-  /* ---------- renderer: Aurora Bloom (WebGL silk ribbons) ---------- */
-  function Aurora() {
-    var canvas = $('aur'), gl = null, U = {}, phase = 0, P = null;
-    try { gl = canvas.getContext('webgl', { alpha: true, premultipliedAlpha: true, antialias: false }) || canvas.getContext('experimental-webgl', { alpha: true, premultipliedAlpha: true }); } catch (e) { gl = null; }
-    if (gl) {
-      var compile = function (type, src) { var s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) { console.error(gl.getShaderInfoLog(s)); return null; } return s; };
-      var vs = compile(gl.VERTEX_SHADER, 'attribute vec2 a; void main(){ gl_Position = vec4(a, 0.0, 1.0); }');
-      var fs = compile(gl.FRAGMENT_SHADER, $('fs').textContent);
-      var prog = vs && fs ? gl.createProgram() : null;
-      if (prog) { gl.attachShader(prog, vs); gl.attachShader(prog, fs); gl.linkProgram(prog); }
-      if (prog && gl.getProgramParameter(prog, gl.LINK_STATUS)) {
-        gl.useProgram(prog);
-        var buf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, buf);
-        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
-        var loc = gl.getAttribLocation(prog, 'a'); gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
-        ['uRes', 'uPhase', 'uHi', 'uCream', 'uMid', 'uEdge', 'uGold', 'uPeach', 'uLav', 'uPeriod', 'uAngle', 'uWarp', 'uUnd', 'uGoldAmt', 'uPeachAmt', 'uFringeAmt', 'uLavAmt', 'uLimb', 'uShadow', 'uSheen', 'uSpec', 'uRim', 'uDir']
-          .forEach(function (n) { U[n] = gl.getUniformLocation(prog, n); });
-      } else gl = null;
-    }
-    function c3(n, hex) { var c = hexToRgb(hex); gl.uniform3f(U[n], c.r / 255, c.g / 255, c.b / 255); }
-    function resize() {
-      if (!gl) return;
-      var dpr = Math.min(window.devicePixelRatio || 1, 2), rect = canvas.getBoundingClientRect();
-      var w = Math.max(1, Math.round(rect.width * dpr)), h = Math.max(1, Math.round(rect.height * dpr));
-      if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
-      gl.viewport(0, 0, w, h); gl.uniform2f(U.uRes, w, h);
-    }
-    return {
-      id: 'aurora', title: 'Aurora Bloom', desc: 'Silk ribbons of gold and peach flowing through a cream sphere.',
-      groups: [
-        { name: 'Animation', controls: [
-          { key: 'cycle', label: 'Cycle length', type: 'range', min: 4, max: 40, step: 0.5, value: 14, unit: 's' },
-          { key: 'reverse', label: 'Reverse travel', type: 'toggle', value: false } ] },
-        { name: 'Ribbons', controls: [
-          { key: 'period', label: 'Band period', type: 'range', min: 0.5, max: 3, step: 0.01, value: 1.17 },
-          { key: 'angle', label: 'Band angle', type: 'range', min: 0, max: 180, step: 1, value: 57, unit: '°' },
-          { key: 'warp', label: 'Warp', type: 'range', min: 0, max: 1.5, step: 0.01, value: 0.62 },
-          { key: 'undulation', label: 'Undulation', type: 'range', min: 0, max: 0.4, step: 0.01, value: 0.11 },
-          { key: 'goldAmt', label: 'Gold fold', type: 'range', min: 0, max: 1, step: 0.01, value: 0.93 },
-          { key: 'peachAmt', label: 'Peach fold', type: 'range', min: 0, max: 1, step: 0.01, value: 0.72 },
-          { key: 'fringeAmt', label: 'Light fringe', type: 'range', min: 0, max: 1, step: 0.01, value: 0.85 },
-          { key: 'lavAmt', label: 'Lavender whisper', type: 'range', min: 0, max: 0.5, step: 0.01, value: 0.15 } ] },
-        { name: 'Sphere shading', controls: [
-          { key: 'limb', label: 'Gold limb', type: 'range', min: 0, max: 1, step: 0.01, value: 0.55 },
-          { key: 'shadowGold', label: 'Shadow side', type: 'range', min: 0, max: 1, step: 0.01, value: 0.30 },
-          { key: 'sheen', label: 'Sheen', type: 'range', min: 0, max: 1, step: 0.01, value: 0.40 },
-          { key: 'spec', label: 'Specular', type: 'range', min: 0, max: 0.6, step: 0.01, value: 0.20 },
-          { key: 'shaderRim', label: 'Inner rim light', type: 'range', min: 0, max: 1, step: 0.01, value: 0.55 } ] },
-        { name: 'Colors', controls: [
-          { key: 'highlight', label: 'Highlight', type: 'color', value: '#fffdf3' },
-          { key: 'cream', label: 'Cream body', type: 'color', value: '#fff8dd' },
-          { key: 'mid', label: 'Mid tone', type: 'color', value: '#fbeebd' },
-          { key: 'edge', label: 'Edge gold', type: 'color', value: '#f3dfa2' },
-          { key: 'gold', label: 'Gold fold', type: 'color', value: '#efcf7e' },
-          { key: 'peach', label: 'Peach fold', type: 'color', value: '#f8d9b8' },
-          { key: 'lavender', label: 'Lavender', type: 'color', value: '#dcd0e8' } ] }
-      ].concat(shellGroups({ rimAlpha: 0.35, ishAlpha: 0.22, ishY: -6, ishBlur: 14 })),
-      show: function (on) { canvas.hidden = !on; },
-      apply: function (p) {
-        P = p; applyShell(p);
-        rs.setProperty('--orb-bg', 'radial-gradient(circle at 38% 32%, ' + p.highlight + ' 0%, ' + p.cream + ' 28%, ' + p.mid + ' 60%, ' + p.edge + ' 100%)');
-        if (!gl) return;
-        resize();
-        c3('uHi', p.highlight); c3('uCream', p.cream); c3('uMid', p.mid); c3('uEdge', p.edge); c3('uGold', p.gold); c3('uPeach', p.peach); c3('uLav', p.lavender);
-        gl.uniform1f(U.uPeriod, p.period); gl.uniform1f(U.uAngle, p.angle * Math.PI / 180); gl.uniform1f(U.uWarp, p.warp); gl.uniform1f(U.uUnd, p.undulation);
-        gl.uniform1f(U.uGoldAmt, p.goldAmt); gl.uniform1f(U.uPeachAmt, p.peachAmt); gl.uniform1f(U.uFringeAmt, p.fringeAmt); gl.uniform1f(U.uLavAmt, p.lavAmt);
-        gl.uniform1f(U.uLimb, p.limb); gl.uniform1f(U.uShadow, p.shadowGold); gl.uniform1f(U.uSheen, p.sheen); gl.uniform1f(U.uSpec, p.spec); gl.uniform1f(U.uRim, p.shaderRim);
-        gl.uniform1f(U.uDir, p.reverse ? -1 : 1);
-      },
-      resize: resize,
-      frame: function (dt, paused) {
-        if (!gl || !P) return;
-        if (!paused) phase = (phase + dt * speed / (P.cycle * 1000)) % 1;
-        gl.uniform1f(U.uPhase, phase * TAU);
-        gl.drawArrays(gl.TRIANGLES, 0, 3);
-      }
-    };
   }
 
   /* ---------- renderer: Liquid Gold (blurred canvas honey blobs + gloss) ---------- */
@@ -559,10 +392,10 @@ void main(){
   }
 
   /* ---------- state ---------- */
-  var renderers = { aurora: Aurora(), liquid: Liquid() };
+  var renderers = { liquid: Liquid() };
   var STORE = 'orb-studio:v1';
-  var state = { orb: 'aurora', params: {} };
-  try { var saved = JSON.parse(localStorage.getItem(STORE) || 'null'); if (saved && saved.params) { state.orb = renderers[saved.orb] ? saved.orb : 'aurora'; state.params = saved.params; } } catch (e) {}
+  var state = { orb: 'liquid', params: {} };
+  try { var saved = JSON.parse(localStorage.getItem(STORE) || 'null'); if (saved && saved.params) { state.orb = 'liquid'; state.params = saved.params; } } catch (e) {}
   function defaultsOf(r) { var d = {}; r.groups.forEach(function (g) { g.controls.forEach(function (c) { d[c.key] = c.value; }); }); return d; }
   function paramsOf(id) {
     var d = defaultsOf(renderers[id]), p = Object.assign({}, d), s = state.params[id];
