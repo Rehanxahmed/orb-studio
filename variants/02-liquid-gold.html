@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Orb — 02 Liquid Gold</title>
+<!--
+  Liquid Gold — heavy honey, glossy. Canvas 2D: a cream base + 6 large, very soft elliptical radial-gradient blobs (gold,
+  cream, peach, warm gold, bright cream, a lavender whisper) and a small honey accent, drifting on Lissajous paths whose
+  frequencies are integer harmonics of one loop (seamless). That canvas is 1.7× the orb and CSS-blurred. Sphere depth on
+  top: an unblurred canvas paints a sliding specular; a CSS shade layer adds the top-left highlight, a back-light crescent,
+  the gold limb and the rim. Every color and amount is driven by the control panel.
+-->
+<style>
+  /* ---- shared framing, all tunable through CSS variables set by panel.js ---- */
+  :root {
+    --orb-scale: 1;
+    --R: calc(min(17vw, 9vh) * var(--orb-scale));            /* orb radius → diameter 34vw on a phone (≈132px @390) */
+    --c-hi: #fffdf3; --c-core: #fff8dd; --c-mid: #fbeebd; --c-edge: #f3dfa2;
+    --orb-inner: inset 0 0 0 1px rgba(255,255,255,.6), inset 0 -6px 14px rgba(232,190,110,.3);
+    --orb-outer: 0 0 40px 6px rgba(246,214,130,.45), 0 0 90px 20px rgba(246,214,130,.22);
+    --halo-size: 5.2;
+    --halo-bg: radial-gradient(circle, rgba(253,232,170,.62) 0%, rgba(253,232,170,.34) 22%, rgba(253,232,170,.12) 42%, rgba(253,232,170,0) 62%);
+    --ring-w: 1px; --ring-1: rgba(255,255,255,.40); --ring-2: rgba(255,255,255,.32); --ring-3: rgba(255,255,255,.24); --ring-sp: 1; --rings-display: block;
+  }
+  html, body { margin: 0; height: 100%; overflow: hidden; }
+  .scene { position: absolute; inset: 0; overflow: hidden; background: #dcd6ea url(../assets/claude-bg.png) center 44% / cover no-repeat; }
+  .stage { position: absolute; left: 50%; top: 44%; width: 0; height: 0; }
+  .stage > * { position: absolute; left: 0; top: 0; transform: translate(-50%, -50%); border-radius: 50%; }
+  .halo { width: calc(var(--R) * var(--halo-size)); height: calc(var(--R) * var(--halo-size)); background: var(--halo-bg); pointer-events: none; }
+  .ring { pointer-events: none; display: var(--rings-display); border: var(--ring-w) solid var(--ring-1); }
+  .r1 { width: calc(var(--R) * 3.5 * var(--ring-sp)); height: calc(var(--R) * 3.5 * var(--ring-sp)); }
+  .r2 { width: calc(var(--R) * 5.0 * var(--ring-sp)); height: calc(var(--R) * 5.0 * var(--ring-sp)); border-color: var(--ring-2); }
+  .r3 { width: calc(var(--R) * 6.6 * var(--ring-sp)); height: calc(var(--R) * 6.6 * var(--ring-sp)); border-color: var(--ring-3); }
+  .orb { width: calc(var(--R) * 2); height: calc(var(--R) * 2); overflow: hidden; box-shadow: var(--orb-outer);
+         background: radial-gradient(circle at 38% 32%, var(--c-hi) 0%, var(--c-core) 28%, var(--c-mid) 60%, var(--c-edge) 100%); }
+  .shade { position: absolute; inset: 0; border-radius: 50%; pointer-events: none; box-shadow: var(--orb-inner); background: var(--shade-bg, none); }
+  .orb { background: var(--base, #fff6da); }
+  .liquid { position: absolute; inset: 0; border-radius: 50%; overflow: hidden;
+            transform: translateZ(0); -webkit-transform: translateZ(0); isolation: isolate; }
+  .liquid canvas { position: absolute; left: -35%; top: -35%; width: 170%; height: 170%; display: block;
+                   filter: blur(var(--liquid-blur, calc(var(--R) * 0.13))); -webkit-filter: blur(var(--liquid-blur, calc(var(--R) * 0.13))); }
+  .gloss { position: absolute; inset: 0; width: 100%; height: 100%; display: block; pointer-events: none; }
+  .shade { box-shadow: var(--orb-inner), inset 0 0 5px 1px rgba(255,253,242,.40); }
+</style>
+</head>
+<body>
+  <div class="scene">
+    <div class="stage">
+      <div class="halo"></div>
+      <div class="ring r3"></div><div class="ring r2"></div><div class="ring r1"></div>
+      <div class="orb">
+        <div class="liquid"><canvas id="c"></canvas></div>
+        <canvas id="g" class="gloss"></canvas>
+        <div class="shade"></div>
+      </div>
+    </div>
+  </div>
+
+<script src="panel.js"></script>
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('c'), ctx = canvas.getContext('2d');
+  var gcan = document.getElementById('g'), gctx = gcan.getContext('2d');
+  var W = 0, H = 0, GW = 0, GH = 0, dpr = 1;
+  var TAU = Math.PI * 2;
+  var reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var speed = reduced ? 0.2 : 1;
+
+  // Blob motion: positions in orb radii relative to the centre; kx/ky harmonic numbers (period = LOOP/k), ax/ay travel,
+  // rad radius, pulse breathing, sq ellipse squash. Colors/alphas come from the panel (see apply()).
+  var blobs = [
+    { key: 'gold',        a: .92, rad: .92, ax: .50, ay: .40, kx: 2, ky: 3, px: 0.0, py: 1.9, pulse: .08, sq: .18 },
+    { key: 'cream',       a: .96, rad: .84, ax: .46, ay: .50, kx: 3, ky: 2, px: 2.1, py: 0.6, pulse: .07, sq: .16 },
+    { key: 'peach',       a: .84, rad: .80, ax: .54, ay: .44, kx: 1, ky: 4, px: 4.0, py: 2.8, pulse: .10, sq: .22 },
+    { key: 'warmGold',    a: .84, rad: .86, ax: .42, ay: .54, kx: 4, ky: 1, px: 1.2, py: 4.4, pulse: .08, sq: .18 },
+    { key: 'brightCream', a: .90, rad: .72, ax: .50, ay: .36, kx: 2, ky: 4, px: 5.3, py: 1.1, pulse: .12, sq: .20 },
+    { key: 'lavender',    a: .22, rad: .66, ax: .30, ay: .26, kx: 1, ky: 3, px: 3.3, py: 0.2, pulse: .10, sq: .14, ox: .04, oy: .28 },
+    { key: 'honey',       a: .26, rad: .46, ax: .20, ay: .16, kx: 3, ky: 4, px: 0.8, py: 3.5, pulse: .14, sq: .24, ox: .38, oy: .42 }
+  ];
+  var P = null;   // current params
+
+  function resize() {
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    var r = canvas.getBoundingClientRect();
+    var w = Math.max(1, Math.round(r.width * dpr)), h = Math.max(1, Math.round(r.height * dpr));
+    if (w !== W || h !== H) { W = canvas.width = w; H = canvas.height = h; }
+    var q = gcan.getBoundingClientRect();
+    var gw = Math.max(1, Math.round(q.width * dpr)), gh = Math.max(1, Math.round(q.height * dpr));
+    if (gw !== GW || gh !== GH) { GW = gcan.width = gw; GH = gcan.height = gh; }
+  }
+
+  function draw(t) {
+    if (!P) return;
+    var LOOP = P.loop;
+    var R = W / 3.4, cx = W / 2, cy = H / 2;
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.fillStyle = P.base;
+    ctx.fillRect(0, 0, W, H);
+
+    var rot = Math.sin(TAU * t / LOOP) * P.swing;
+    var cr = Math.cos(rot), sr = Math.sin(rot);
+
+    for (var i = 0; i < blobs.length; i++) {
+      var b = blobs[i];
+      var alpha = b.key === 'honey' ? P.honeyAmt : b.key === 'lavender' ? P.lavenderAmt : Math.min(1, b.a * P.opacity);
+      if (alpha <= 0.001) continue;
+      var x = (b.ox || 0) + b.ax * P.travel * Math.sin(TAU * b.kx * t / LOOP + b.px);
+      var y = (b.oy || 0) + b.ay * P.travel * Math.sin(TAU * b.ky * t / LOOP + b.py);
+      var rx = x * cr - y * sr, ry = x * sr + y * cr;
+      var rad = b.rad * P.blobSize * (1 + b.pulse * Math.sin(TAU * (b.kx + b.ky) * t / LOOP + b.px * 1.7));
+      var X = cx + rx * R, Y = cy + ry * R, Q = rad * R;
+      var ang = TAU * b.ky * t / LOOP * 0.5 + b.py;
+      var sq = 1 - b.sq * (0.5 + 0.5 * Math.sin(TAU * b.kx * t / LOOP + b.px + 1.3));
+      ctx.save();
+      ctx.translate(X, Y); ctx.rotate(ang); ctx.scale(1, sq);
+      var g = ctx.createRadialGradient(0, 0, 0, 0, 0, Q);
+      var c = OrbPanel.hexToRgb(P[b.key]); var col = c.r + ',' + c.g + ',' + c.b;
+      g.addColorStop(0,    'rgba(' + col + ',' + alpha.toFixed(3) + ')');
+      g.addColorStop(0.50, 'rgba(' + col + ',' + (alpha * 0.78).toFixed(3) + ')');
+      g.addColorStop(0.82, 'rgba(' + col + ',' + (alpha * 0.22).toFixed(3) + ')');
+      g.addColorStop(1,    'rgba(' + col + ',0)');
+      ctx.fillStyle = g;
+      ctx.fillRect(-Q, -Q, Q * 2, Q * 2);
+      ctx.restore();
+    }
+
+    // ---- gloss: one soft specular + a tiny hot core, sliding on a small slow loop ----
+    var GR = GW / 2, gx = GW / 2, gy = GH / 2;
+    gctx.clearRect(0, 0, GW, GH);
+    if (P.gloss <= 0.001) return;
+    var sx = -0.40 + 0.06 * Math.sin(TAU * t / LOOP + 0.4) + 0.03 * Math.sin(TAU * 3 * t / LOOP + 2.0);
+    var sy = -0.44 + 0.05 * Math.sin(TAU * 2 * t / LOOP + 1.7);
+    var SX = gx + sx * GR, SY = gy + sy * GR;
+    var sa = P.gloss * (1 + 0.09 * Math.sin(TAU * 2 * t / LOOP + 0.9));
+    gctx.save();
+    gctx.translate(SX, SY); gctx.rotate(-0.72); gctx.scale(1, 0.62);
+    var s1 = GR * P.glossSize;
+    var sg = gctx.createRadialGradient(0, 0, 0, 0, 0, s1);
+    sg.addColorStop(0,    'rgba(255,255,255,' + Math.min(1, sa).toFixed(3) + ')');
+    sg.addColorStop(0.32, 'rgba(255,255,253,' + Math.min(1, sa * 0.58).toFixed(3) + ')');
+    sg.addColorStop(0.70, 'rgba(255,254,248,' + Math.min(1, sa * 0.14).toFixed(3) + ')');
+    sg.addColorStop(1,    'rgba(255,254,248,0)');
+    gctx.fillStyle = sg;
+    gctx.fillRect(-s1, -s1, s1 * 2, s1 * 2);
+    gctx.restore();
+    var s2 = GR * 0.085;
+    var hx = SX - GR * 0.03, hy = SY - GR * 0.03;
+    var hg = gctx.createRadialGradient(hx, hy, 0, hx, hy, s2);
+    hg.addColorStop(0,   'rgba(255,255,255,' + Math.min(1, sa * 0.75).toFixed(3) + ')');
+    hg.addColorStop(0.5, 'rgba(255,255,255,' + Math.min(1, sa * 0.30).toFixed(3) + ')');
+    hg.addColorStop(1,   'rgba(255,255,255,0)');
+    gctx.fillStyle = hg;
+    gctx.fillRect(hx - s2, hy - s2, s2 * 2, s2 * 2);
+  }
+
+  function mixHex(hex, white) { var c = OrbPanel.hexToRgb(hex); var f = function (v) { return Math.round(v + (255 - v) * white); }; return '#' + [f(c.r), f(c.g), f(c.b)].map(function (v) { return ('0' + v.toString(16)).slice(-2); }).join(''); }
+  function apply(p) {
+    P = p;
+    OrbPanel.applyShell(p);
+    var s = document.documentElement.style, rgba = OrbPanel.rgba;
+    s.setProperty('--base', p.base);
+    s.setProperty('--liquid-blur', 'calc(var(--R) * ' + p.blur + ')');
+    var limbLight = mixHex(p.limbColor, 0.45);
+    s.setProperty('--shade-bg',
+      'radial-gradient(circle at 34% 28%, ' + rgba('#ffffff', .74 * p.highlight) + ' 0%, ' + rgba('#ffffff', .36 * p.highlight) + ' 20%, rgba(255,255,255,0) 48%), ' +
+      'radial-gradient(circle at 72% 82%, rgba(255,250,232,0) 38%, ' + rgba('#fffae8', .30 * p.backlight) + ' 56%, rgba(255,250,232,0) 68%), ' +
+      'radial-gradient(circle var(--R) at 45% 41%, ' + rgba(limbLight, 0) + ' ' + Math.round(p.limbStart * 100) + '%, ' + rgba(limbLight, .40 * p.limb) + ' 82%, ' + rgba(p.limbColor, .84 * p.limb) + ' 100%)');
+    resize();
+    draw(tAcc);
+  }
+
+  var raf = 0, last = 0, tAcc = 0;
+  function frame(now) {
+    if (!last) last = now;
+    if (!(P && P.paused)) tAcc += Math.min(now - last, 100) / 1000 * speed;
+    last = now;
+    draw(tAcc);
+    raf = requestAnimationFrame(frame);
+  }
+  function start() { if (!raf) { last = 0; raf = requestAnimationFrame(frame); } }
+  function stop()  { if (raf) { cancelAnimationFrame(raf); raf = 0; } }
+  window.addEventListener('resize', function () { resize(); draw(tAcc); });
+  document.addEventListener('visibilitychange', function () { document.hidden ? stop() : start(); });
+  if (window.matchMedia) {
+    var mq = window.matchMedia('(prefers-reduced-motion: reduce)');
+    var onMq = function (e) { speed = e.matches ? 0.2 : 1; };
+    if (mq.addEventListener) mq.addEventListener('change', onMq); else if (mq.addListener) mq.addListener(onMq);
+  }
+
+  OrbPanel.create({
+    id: '02-liquid-gold', title: 'Liquid Gold',
+    groups: [
+      { name: 'Animation', controls: [
+        { key: 'loop', label: 'Loop length', type: 'range', min: 10, max: 120, step: 1, value: 42, unit: 's' },
+        { key: 'swing', label: 'Field swing', type: 'range', min: 0, max: 1, step: 0.01, value: 0.40 } ] },
+      { name: 'Liquid', controls: [
+        { key: 'blur', label: 'Blur', type: 'range', min: 0, max: 0.4, step: 0.005, value: 0.13, unit: '×R' },
+        { key: 'blobSize', label: 'Blob size', type: 'range', min: 0.5, max: 1.6, step: 0.01, value: 1, unit: '×' },
+        { key: 'travel', label: 'Travel', type: 'range', min: 0, max: 1.6, step: 0.01, value: 1, unit: '×' },
+        { key: 'opacity', label: 'Blob opacity', type: 'range', min: 0.3, max: 1.2, step: 0.01, value: 1, unit: '×' },
+        { key: 'honeyAmt', label: 'Honey accent', type: 'range', min: 0, max: 0.8, step: 0.01, value: 0.26 },
+        { key: 'lavenderAmt', label: 'Lavender whisper', type: 'range', min: 0, max: 0.8, step: 0.01, value: 0.22 } ] },
+      { name: 'Sphere shading', controls: [
+        { key: 'highlight', label: 'Top highlight', type: 'range', min: 0, max: 1.3, step: 0.01, value: 1 },
+        { key: 'backlight', label: 'Back light', type: 'range', min: 0, max: 1.5, step: 0.01, value: 1 },
+        { key: 'limb', label: 'Gold limb', type: 'range', min: 0, max: 1.2, step: 0.01, value: 1 },
+        { key: 'limbStart', label: 'Limb start', type: 'range', min: 0.3, max: 0.8, step: 0.01, value: 0.56 },
+        { key: 'limbColor', label: 'Limb color', type: 'color', value: '#e9c97a' },
+        { key: 'gloss', label: 'Specular', type: 'range', min: 0, max: 1, step: 0.01, value: 0.86 },
+        { key: 'glossSize', label: 'Specular size', type: 'range', min: 0.1, max: 0.6, step: 0.01, value: 0.30 } ] },
+      { name: 'Colors', controls: [
+        { key: 'base', label: 'Base', type: 'color', value: '#fff6da' },
+        { key: 'gold', label: 'Gold', type: 'color', value: '#f2d28b' },
+        { key: 'cream', label: 'Cream', type: 'color', value: '#fff6da' },
+        { key: 'peach', label: 'Peach', type: 'color', value: '#f8d9b8' },
+        { key: 'warmGold', label: 'Warm gold', type: 'color', value: '#efcf7e' },
+        { key: 'brightCream', label: 'Bright cream', type: 'color', value: '#fffbec' },
+        { key: 'lavender', label: 'Lavender', type: 'color', value: '#f0e4f0' },
+        { key: 'honey', label: 'Honey', type: 'color', value: '#e8b96a' } ] }
+    ].concat(OrbPanel.shellGroups({ rimAlpha: 0.70, ishColor: '#e8be6e', ishAlpha: 0.32, ishY: -7, ishBlur: 16 })),
+    apply: apply
+  });
+
+  resize();
+  if (!document.hidden) start();
+})();
+</script>
+</body>
+</html>

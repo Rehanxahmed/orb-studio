@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Orb — 02 Liquid Gold (A: honey mesh, refined)</title>
+<!--
+  Liquid Gold — heavy honey, glossy. Canvas 2D: a cream base + 6 large, very soft elliptical radial-gradient blobs (gold, cream,
+  peach, warm gold, bright cream, a lavender whisper) and one small ≤30% honey accent, drifting on Lissajous paths whose
+  frequencies are integer harmonics of one 48 s loop (seamless, never resets). That canvas is 1.7× the orb and CSS-blurred.
+  Sphere depth on top: a second, unblurred canvas paints a bright specular that slowly slides; a CSS shade layer adds the
+  broad top-left highlight, a lower-right back-light crescent, the gold limb (#F3DFA2 → #E9C97A) and a crisp 1px rim.
+-->
+<style>
+  /* ---- shared framing: DO NOT change geometry/colors of the halo & rings unless the brief says so ---- */
+  :root { --R: min(17vw, 9vh); }            /* orb radius → diameter 34vw on a phone (≈132px @390) */
+  html, body { margin: 0; height: 100%; overflow: hidden; }
+  body { background: #dcd6ea url(../assets/claude-bg.png) center 44% / cover no-repeat; }
+  .stage { position: absolute; left: 50%; top: 44%; width: 0; height: 0; }
+  .stage > * { position: absolute; left: 0; top: 0; transform: translate(-50%, -50%); border-radius: 50%; }
+  .halo { width: calc(var(--R) * 5.2); height: calc(var(--R) * 5.2); pointer-events: none;
+          background: radial-gradient(circle, rgba(253,232,170,.62) 0%, rgba(253,232,170,.34) 22%, rgba(253,232,170,.12) 42%, rgba(253,232,170,0) 62%); }
+  .ring { pointer-events: none; border: 1px solid rgba(255,255,255,.40); }
+  .r1 { width: calc(var(--R) * 3.5); height: calc(var(--R) * 3.5); }
+  .r2 { width: calc(var(--R) * 5.0); height: calc(var(--R) * 5.0); border-color: rgba(255,255,255,.32); }
+  .r3 { width: calc(var(--R) * 6.6); height: calc(var(--R) * 6.6); border-color: rgba(255,255,255,.24); }
+  .orb { width: calc(var(--R) * 2); height: calc(var(--R) * 2); overflow: hidden;
+         background: #fff6da;                       /* cream base under the liquid (also the reduced-JS fallback) */
+         box-shadow: 0 0 40px 6px rgba(246,214,130,.45), 0 0 90px 20px rgba(246,214,130,.22); }
+
+  /* ---- variant: liquid layer (clipped, own compositing layer so Safari honours the rounded clip on a filtered child) ---- */
+  .liquid { position: absolute; inset: 0; border-radius: 50%; overflow: hidden;
+            transform: translateZ(0); -webkit-transform: translateZ(0); isolation: isolate; }
+  .liquid canvas { position: absolute; left: -35%; top: -35%; width: 170%; height: 170%; display: block;
+                   filter: blur(calc(var(--R) * 0.13)); -webkit-filter: blur(calc(var(--R) * 0.13)); }
+  /* unblurred specular canvas — sits between the liquid and the shade so the rim stays on top */
+  .gloss { position: absolute; inset: 0; width: 100%; height: 100%; display: block; pointer-events: none; }
+  /* sphere shading over the liquid: broad top-left highlight, back-light crescent low-right, gold limb, crisp 1px rim */
+  .shade { position: absolute; inset: 0; border-radius: 50%; pointer-events: none;
+           background:
+             radial-gradient(circle at 34% 28%, rgba(255,255,255,.74) 0%, rgba(255,255,255,.36) 20%, rgba(255,255,255,0) 48%),
+             radial-gradient(circle at 72% 82%, rgba(255,250,232,0) 38%, rgba(255,250,232,.30) 56%, rgba(255,250,232,0) 68%),
+             /* limb sized to exactly R and offset up-left, so the lower-right edge clamps to the deep gold while top-left stays lighter */
+             radial-gradient(circle var(--R) at 45% 41%, rgba(243,223,162,0) 56%, rgba(243,223,162,.40) 82%, rgba(233,201,122,.84) 100%);
+           box-shadow: inset 0 0 0 1px rgba(255,255,255,.70), inset 0 -7px 16px rgba(232,190,110,.32),
+                       inset 0 0 5px 1px rgba(255,253,242,.40); }
+</style>
+</head>
+<body>
+  <div class="stage">
+    <div class="halo"></div>
+    <div class="ring r3"></div><div class="ring r2"></div><div class="ring r1"></div>
+    <div class="orb">
+      <div class="liquid"><canvas id="c"></canvas></div>
+      <canvas id="g" class="gloss"></canvas>
+      <div class="shade"></div>
+    </div>
+  </div>
+
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('c'), ctx = canvas.getContext('2d');
+  var gcan = document.getElementById('g'), gctx = gcan.getContext('2d');
+  var W = 0, H = 0, GW = 0, GH = 0, dpr = 1;
+
+  var LOOP = 42;                                   // seconds; every frequency below is k·(2π/LOOP) → seamless loop
+  var TAU = Math.PI * 2;
+  var reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var speed = reduced ? 0.2 : 1;                   // reduced motion: 5× slower, never frozen
+
+  /* Blobs. Positions are in orb radii (R = 1) relative to the orb centre; the canvas is 1.7× the orb so the field can be
+     painted past the clip. kx/ky = harmonic numbers (period = LOOP/k s), ax/ay = travel, rad = blob radius, pulse = radius
+     breathing, sq = ellipse squash. Nothing darker than #EFCF7E except the small honey accent (#E8B96A at 26 % alpha). */
+  var blobs = [
+    { c: [242, 210, 139], a: .92, rad: .92, ax: .50, ay: .40, kx: 2, ky: 3, px: 0.0, py: 1.9, pulse: .08, sq: .18 },  // gold #F2D28B
+    { c: [255, 246, 218], a: .96, rad: .84, ax: .46, ay: .50, kx: 3, ky: 2, px: 2.1, py: 0.6, pulse: .07, sq: .16 },  // cream #FFF6DA
+    { c: [248, 217, 184], a: .84, rad: .80, ax: .54, ay: .44, kx: 1, ky: 4, px: 4.0, py: 2.8, pulse: .10, sq: .22 },  // peach #F8D9B8
+    { c: [239, 207, 126], a: .84, rad: .86, ax: .42, ay: .54, kx: 4, ky: 1, px: 1.2, py: 4.4, pulse: .08, sq: .18 },  // warm gold #EFCF7E
+    { c: [255, 251, 236], a: .90, rad: .72, ax: .50, ay: .36, kx: 2, ky: 4, px: 5.3, py: 1.1, pulse: .12, sq: .20 },  // bright cream
+    { c: [240, 228, 240], a: .22, rad: .66, ax: .30, ay: .26, kx: 1, ky: 3, px: 3.3, py: 0.2, pulse: .10, sq: .14, ox: .04, oy: .28 }, // lavender whisper
+    { c: [232, 185, 106], a: .26, rad: .46, ax: .20, ay: .16, kx: 3, ky: 4, px: 0.8, py: 3.5, pulse: .14, sq: .24, ox: .38, oy: .42 }  // honey accent #E8B96A, pools low-right
+  ];
+
+  function resize() {
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    var r = canvas.getBoundingClientRect();
+    var w = Math.max(1, Math.round(r.width * dpr)), h = Math.max(1, Math.round(r.height * dpr));
+    if (w !== W || h !== H) { W = canvas.width = w; H = canvas.height = h; }
+    var q = gcan.getBoundingClientRect();
+    var gw = Math.max(1, Math.round(q.width * dpr)), gh = Math.max(1, Math.round(q.height * dpr));
+    if (gw !== GW || gh !== GH) { GW = gcan.width = gw; GH = gcan.height = gh; }
+  }
+
+  function draw(t) {
+    // ---- liquid (blurred canvas, covers 1.7 orb diameters → orb radius in canvas px) ----
+    var R = W / 3.4, cx = W / 2, cy = H / 2;
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.fillStyle = '#fff6da';
+    ctx.fillRect(0, 0, W, H);
+
+    // whole field slowly swings (once per loop) so paths never feel mechanical
+    var rot = Math.sin(TAU * t / LOOP) * 0.40;
+    var cr = Math.cos(rot), sr = Math.sin(rot);
+
+    for (var i = 0; i < blobs.length; i++) {
+      var b = blobs[i];
+      var x = (b.ox || 0) + b.ax * Math.sin(TAU * b.kx * t / LOOP + b.px);
+      var y = (b.oy || 0) + b.ay * Math.sin(TAU * b.ky * t / LOOP + b.py);
+      var rx = x * cr - y * sr, ry = x * sr + y * cr;
+      var rad = b.rad * (1 + b.pulse * Math.sin(TAU * (b.kx + b.ky) * t / LOOP + b.px * 1.7));
+      var X = cx + rx * R, Y = cy + ry * R, P = rad * R;
+      // heavy liquid: each blob is a slowly turning, breathing ellipse
+      var ang = TAU * b.ky * t / LOOP * 0.5 + b.py;
+      var sq = 1 - b.sq * (0.5 + 0.5 * Math.sin(TAU * b.kx * t / LOOP + b.px + 1.3));
+      ctx.save();
+      ctx.translate(X, Y); ctx.rotate(ang); ctx.scale(1, sq);
+      var g = ctx.createRadialGradient(0, 0, 0, 0, 0, P);
+      var col = b.c[0] + ',' + b.c[1] + ',' + b.c[2];
+      g.addColorStop(0,    'rgba(' + col + ',' + b.a + ')');
+      g.addColorStop(0.50, 'rgba(' + col + ',' + (b.a * 0.78).toFixed(3) + ')');
+      g.addColorStop(0.82, 'rgba(' + col + ',' + (b.a * 0.22).toFixed(3) + ')');
+      g.addColorStop(1,    'rgba(' + col + ',0)');
+      ctx.fillStyle = g;
+      ctx.fillRect(-P, -P, P * 2, P * 2);
+      ctx.restore();
+    }
+
+    // ---- gloss (unblurred canvas at orb size): one soft specular + a tiny hot core, sliding on a small slow loop ----
+    var GR = GW / 2, gx = GW / 2, gy = GH / 2;
+    gctx.clearRect(0, 0, GW, GH);
+    var sx = -0.40 + 0.06 * Math.sin(TAU * t / LOOP + 0.4) + 0.03 * Math.sin(TAU * 3 * t / LOOP + 2.0);
+    var sy = -0.44 + 0.05 * Math.sin(TAU * 2 * t / LOOP + 1.7);
+    var SX = gx + sx * GR, SY = gy + sy * GR;
+    var sa = 0.86 + 0.08 * Math.sin(TAU * 2 * t / LOOP + 0.9);   // gentle brightness breath
+    gctx.save();
+    gctx.translate(SX, SY); gctx.rotate(-0.72); gctx.scale(1, 0.62);
+    var s1 = GR * 0.30;
+    var sg = gctx.createRadialGradient(0, 0, 0, 0, 0, s1);
+    sg.addColorStop(0,    'rgba(255,255,255,' + sa.toFixed(3) + ')');
+    sg.addColorStop(0.32, 'rgba(255,255,253,' + (sa * 0.58).toFixed(3) + ')');
+    sg.addColorStop(0.70, 'rgba(255,254,248,' + (sa * 0.14).toFixed(3) + ')');
+    sg.addColorStop(1,    'rgba(255,254,248,0)');
+    gctx.fillStyle = sg;
+    gctx.fillRect(-s1, -s1, s1 * 2, s1 * 2);
+    gctx.restore();
+    // hot core, slightly offset up-left of the soft spot
+    var s2 = GR * 0.085;
+    var hg = gctx.createRadialGradient(SX - GR * 0.03, SY - GR * 0.03, 0, SX - GR * 0.03, SY - GR * 0.03, s2);
+    hg.addColorStop(0,   'rgba(255,255,255,' + (sa * 0.75).toFixed(3) + ')');
+    hg.addColorStop(0.5, 'rgba(255,255,255,' + (sa * 0.30).toFixed(3) + ')');
+    hg.addColorStop(1,   'rgba(255,255,255,0)');
+    gctx.fillStyle = hg;
+    gctx.fillRect(SX - GR * 0.03 - s2, SY - GR * 0.03 - s2, s2 * 2, s2 * 2);
+  }
+
+  var raf = 0, last = 0, tAcc = 0;
+  function frame(now) {
+    if (!last) last = now;
+    tAcc += Math.min(now - last, 100) / 1000 * speed;   // accumulate so hidden/paused time never jumps the loop
+    last = now;
+    draw(tAcc);
+    raf = requestAnimationFrame(frame);
+  }
+  function start() { if (!raf) { last = 0; raf = requestAnimationFrame(frame); } }
+  function stop()  { if (raf) { cancelAnimationFrame(raf); raf = 0; } }
+
+  window.addEventListener('resize', function () { resize(); draw(tAcc); });
+  document.addEventListener('visibilitychange', function () { document.hidden ? stop() : start(); });
+  if (window.matchMedia) {
+    var mq = window.matchMedia('(prefers-reduced-motion: reduce)');
+    var onMq = function (e) { speed = e.matches ? 0.2 : 1; };
+    if (mq.addEventListener) mq.addEventListener('change', onMq); else if (mq.addListener) mq.addListener(onMq);
+  }
+
+  resize();
+  draw(0);
+  if (!document.hidden) start();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Orb — 02 Liquid Gold (C · mesh drift)</title>
+<!--
+  Liquid Gold · mesh-gradient drift. A WebGL1 fragment shader paints the orb body as an animated mesh gradient: four corner
+  colours (cream / gold / peach / warm cream) blended bilinearly through a slowly translating + rotating grid whose coordinates
+  are bent by 2-octave value noise, plus three floating soft colour spots (gold, a bright cream pool, a ≤15 % lavender whisper)
+  on Lissajous paths. Everything is a smooth mix in the reference palette (never darkening), with a tiny dither so there is
+  zero banding. Sphere shading in-shader: broad top-left highlight + glassy sheen, gold → honey limb on the shadow side, 1 px
+  bright rim, anti-aliased edge. All motion is harmonics of one 14 s cycle, so the loop is seamless.
+-->
+<style>
+  /* ---- shared framing: DO NOT change geometry/colors of the halo & rings unless the brief says so ---- */
+  :root { --R: min(17vw, 9vh); }            /* orb radius → diameter 34vw on a phone (≈132px @390) */
+  html, body { margin: 0; height: 100%; overflow: hidden; }
+  body { background: #dcd6ea url(../assets/claude-bg.png) center 44% / cover no-repeat; }
+  .stage { position: absolute; left: 50%; top: 44%; width: 0; height: 0; }
+  .stage > * { position: absolute; left: 0; top: 0; transform: translate(-50%, -50%); border-radius: 50%; }
+  .halo { width: calc(var(--R) * 5.2); height: calc(var(--R) * 5.2); pointer-events: none;
+          background: radial-gradient(circle, rgba(253,232,170,.62) 0%, rgba(253,232,170,.34) 22%, rgba(253,232,170,.12) 42%, rgba(253,232,170,0) 62%); }
+  .ring { pointer-events: none; border: 1px solid rgba(255,255,255,.40); }
+  .r1 { width: calc(var(--R) * 3.5); height: calc(var(--R) * 3.5); }
+  .r2 { width: calc(var(--R) * 5.0); height: calc(var(--R) * 5.0); border-color: rgba(255,255,255,.32); }
+  .r3 { width: calc(var(--R) * 6.6); height: calc(var(--R) * 6.6); border-color: rgba(255,255,255,.24); }
+  .orb { width: calc(var(--R) * 2); height: calc(var(--R) * 2); overflow: hidden;
+         /* reference body stays as the no-WebGL fallback under the shader; the warm outer glow lives here */
+         background: radial-gradient(circle at 38% 32%, #fffdf3 0%, #fff8dd 28%, #fbeebd 60%, #f3dfa2 100%);
+         box-shadow: inset 0 0 0 1px rgba(255,255,255,.55), inset 0 -6px 14px rgba(232,190,110,.28),
+                     0 0 40px 6px rgba(246,214,130,.45), 0 0 90px 20px rgba(246,214,130,.22); }
+  .orb canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+</style>
+</head>
+<body>
+  <div class="stage">
+    <div class="halo"></div>
+    <div class="ring r3"></div><div class="ring r2"></div><div class="ring r1"></div>
+    <div class="orb"><canvas id="c"></canvas></div>
+  </div>
+
+<script id="vs" type="x-shader/x-vertex">
+attribute vec2 a;
+void main(){ gl_Position = vec4(a, 0.0, 1.0); }
+</script>
+
+<script id="fs" type="x-shader/x-fragment">
+#ifdef GL_FRAGMENT_PRECISION_HIGH
+precision highp float;      /* every iOS/Safari GPU has it; keeps the noise hash clean */
+#else
+precision mediump float;
+#endif
+uniform vec2  uRes;     // canvas size in device pixels
+uniform float uPhase;   // 0..2π, one full 14 s cycle
+
+/* ---- 2-octave value noise with a quintic interpolant (no visible lattice, cheap) ---- */
+float hash(vec2 p){ p = fract(p * vec2(0.1031, 0.1030)); p += dot(p, p.yx + 33.33); return fract((p.x + p.y) * p.x); }
+float vnoise(vec2 p){
+  vec2 i = floor(p), f = fract(p);
+  vec2 u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
+  return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), u.x),
+             mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), u.x), u.y);
+}
+float fbm2(vec2 p){
+  const mat2 m = mat2(0.80, 0.60, -0.60, 0.80);
+  return (vnoise(p) * 0.65 + vnoise(m * p * 2.1 + 7.3) * 0.35);
+}
+
+/* ---- palette (sRGB) — the reference cream/gold family only ---- */
+const vec3 HIGHLIGHT = vec3(1.000, 0.992, 0.953);  // #FFFDF3
+const vec3 CREAM     = vec3(1.000, 0.973, 0.867);  // #FFF8DD
+const vec3 MID       = vec3(0.984, 0.933, 0.741);  // #FBEEBD
+const vec3 EDGE      = vec3(0.953, 0.875, 0.635);  // #F3DFA2
+const vec3 GOLD      = vec3(0.937, 0.812, 0.494);  // #EFCF7E
+const vec3 HONEY     = vec3(0.910, 0.725, 0.416);  // #E8B96A
+const vec3 PEACH     = vec3(0.973, 0.851, 0.722);  // #F8D9B8
+const vec3 LAVENDER  = vec3(0.863, 0.816, 0.910);  // #DCD0E8
+
+/* smooth periodic bilinear weight: 0 at x=-0.5, 1 at x=+0.5, back to 0 at 1.5 — no clamped flats, no seams */
+float w(float x){ return 0.5 - 0.5 * cos(3.14159265 * (x + 0.5)); }
+float spot(vec2 q, vec2 c, float s){ vec2 d = q - c; return exp(-dot(d, d) / (s * s)); }
+
+void main(){
+  vec2 p = (gl_FragCoord.xy * 2.0 - uRes) / min(uRes.x, uRes.y);   // -1..1 (orb radii), y up
+  float r = length(p);
+  float px = 2.0 / min(uRes.x, uRes.y);                              // one device pixel in p-units
+  float ph = uPhase;
+
+  /* ---- the mesh grid drifts: slow translation on a Lissajous path + a gentle rocking rotation ---- */
+  vec2 tr = vec2(sin(ph + 0.4), sin(2.0 * ph + 1.9)) * 0.36;
+  float th = 0.32 * sin(ph + 2.6);
+  mat2 rot = mat2(cos(th), sin(th), -sin(th), cos(th));
+  vec2 g = rot * p * 0.80 + tr;
+
+  /* ---- silk warp: low-frequency noise, its offsets circling in noise space so the cycle loops ---- */
+  vec2 o1 = vec2(cos(ph), sin(ph)) * 0.55;
+  vec2 o2 = vec2(cos(ph + 2.1), sin(ph + 2.1)) * 0.45;
+  vec2 n = vec2(fbm2(g * 1.15 + o1), fbm2(g * 1.15 + o2 + vec2(4.7, 2.3))) - 0.5;
+  vec2 q = g + n * 0.52;
+
+  /* ---- bilinear mesh of the four corner colours ---- */
+  float u = w(q.x), v = w(q.y);
+  vec3 C00 = CREAM;                       // lower-left
+  vec3 C10 = mix(GOLD, MID, 0.45);        // lower-right: gold, lifted toward mid so it never goes tan
+  vec3 C01 = mix(PEACH, CREAM, 0.30);     // upper-left: soft peach
+  vec3 C11 = HIGHLIGHT;                   // upper-right: warm cream
+  vec3 col = mix(mix(C00, C10, u), mix(C01, C11, u), v);
+
+  /* ---- floating soft colour spots on Lissajous paths (evaluated in the warped space → they flow, too) ---- */
+  vec2 s1 = vec2(sin(2.0 * ph + 0.8), sin(3.0 * ph + 2.4)) * vec2(0.48, 0.42) + vec2(0.10, -0.08); // gold pool
+  vec2 s2 = vec2(sin(3.0 * ph + 4.1), sin(2.0 * ph + 0.3)) * vec2(0.40, 0.46) + vec2(-0.12, 0.06); // bright cream pool
+  vec2 s3 = vec2(sin(ph + 1.2),       sin(2.0 * ph + 3.7)) * vec2(0.30, 0.26) + vec2(0.22, 0.18);  // lavender whisper
+  float k1 = spot(q, s1, 0.52) * (0.50 + 0.08 * sin(4.0 * ph + 1.0));
+  float k2 = spot(q, s2, 0.48) * 0.78;
+  float k3 = spot(q, s3, 0.48) * 0.15;                                     // ≤ 15 %
+  col = mix(col, mix(GOLD, MID, 0.18), k1);
+  col = mix(col, HIGHLIGHT, k2 * (1.0 - k1 * 0.5));
+  col = mix(col, mix(CREAM, LAVENDER, 0.75), k3 * (1.0 - k1));
+
+  /* ---- sphere shading ---- */
+  float z = sqrt(max(0.0, 1.0 - r * r));
+  vec3  N = vec3(p, z);
+  vec3  Ld = normalize(vec3(-0.55, 0.62, 0.75));
+  float lam = dot(N, Ld) * 0.5 + 0.5;                     // 0 (lower-right) .. 1 (upper-left)
+  col = mix(col, CREAM, (lam - 0.5) * 0.30);              // lit side lifted, shadow side left richer
+
+  // broad soft highlight top-left (reference: 38 %, 32 %) with a glassy sheen and a soft specular
+  float hl = exp(-dot(p - vec2(-0.26, 0.38), p - vec2(-0.26, 0.38)) / 0.42);
+  col = mix(col, HIGHLIGHT, hl * 0.58);
+  vec3 H = normalize(vec3(-0.55, 0.62, 1.5));
+  float sheen = pow(max(dot(N, H), 0.0), 4.0);
+  col = mix(col, HIGHLIGHT, sheen * 0.28);
+  float spec = pow(max(dot(N, H), 0.0), 26.0);
+  col = mix(col, vec3(1.0), spec * 0.12);
+
+  // limb: warm gold ring toward the edge, deeper honey on the lower-right, a touch of cream on the lit limb
+  float fres = pow(smoothstep(0.42, 1.0, r), 1.5);
+  col = mix(col, EDGE, fres * 0.58);
+  col = mix(col, GOLD, fres * 0.22 * (1.0 - lam));
+  col = mix(col, HONEY, fres * fres * 0.10 * (1.0 - lam));
+  col = mix(col, MID, fres * 0.20 * lam);
+
+  // faint reflected light at the bottom-right limb (glassy liquid read)
+  float refl = exp(-dot(p - vec2(0.42, -0.62), p - vec2(0.42, -0.62)) / 0.09) * smoothstep(0.6, 0.95, r);
+  col = mix(col, CREAM, refl * 0.28);
+
+  // thin bright rim (≈1 px) just inside the edge
+  float rim = smoothstep(1.0 - px * 3.0, 1.0 - px * 1.4, r) * (1.0 - smoothstep(1.0 - px * 1.4, 1.0, r));
+  col = mix(col, vec3(1.0), rim * 0.58);
+
+  // tiny dither (±0.5/255) so the smooth gradients never band
+  float dth = fract(52.9829189 * fract(0.06711056 * gl_FragCoord.x + 0.00583715 * gl_FragCoord.y));
+  col += (dth - 0.5) / 255.0;
+  col = clamp(col, 0.0, 1.0);
+
+  // anti-aliased circular alpha, premultiplied
+  float a = 1.0 - smoothstep(1.0 - px * 1.5, 1.0 + px * 0.2, r);
+  gl_FragColor = vec4(col * a, a);
+}
+</script>
+
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('c');
+  var gl = canvas.getContext('webgl', { alpha: true, premultipliedAlpha: true, antialias: false, preserveDrawingBuffer: false })
+        || canvas.getContext('experimental-webgl', { alpha: true, premultipliedAlpha: true });
+  if (!gl) return; // .orb keeps the reference gradient as a static fallback
+
+  function compile(type, src) {
+    var s = gl.createShader(type);
+    gl.shaderSource(s, src); gl.compileShader(s);
+    return gl.getShaderParameter(s, gl.COMPILE_STATUS) ? s : (gl.deleteShader(s), null);
+  }
+  var vs = compile(gl.VERTEX_SHADER, document.getElementById('vs').textContent);
+  var fs = compile(gl.FRAGMENT_SHADER, document.getElementById('fs').textContent);
+  if (!vs || !fs) return;
+  var prog = gl.createProgram();
+  gl.attachShader(prog, vs); gl.attachShader(prog, fs); gl.linkProgram(prog);
+  if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) return;
+  gl.useProgram(prog);
+
+  var buf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+  var loc = gl.getAttribLocation(prog, 'a');
+  gl.enableVertexAttribArray(loc);
+  gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+  var uRes = gl.getUniformLocation(prog, 'uRes');
+  var uPhase = gl.getUniformLocation(prog, 'uPhase');
+
+  // ---- sizing: DPR-crisp, capped at 2 ----
+  function resize() {
+    var dpr = Math.min(window.devicePixelRatio || 1, 2);
+    var rect = canvas.getBoundingClientRect();
+    var w = Math.max(1, Math.round(rect.width * dpr)), h = Math.max(1, Math.round(rect.height * dpr));
+    if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+    gl.viewport(0, 0, w, h);
+    gl.uniform2f(uRes, w, h);
+  }
+
+  // ---- timing: seamless 14 s loop; reduced motion → 5× slower, never frozen ----
+  var CYCLE = 14000;
+  var mq = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
+  var speed = (mq && mq.matches) ? 0.2 : 1.0;
+  var onMq = function (e) { speed = e.matches ? 0.2 : 1.0; };
+  if (mq) { if (mq.addEventListener) mq.addEventListener('change', onMq); else if (mq.addListener) mq.addListener(onMq); }
+
+  var phase = 0, lastT = 0, raf = 0;
+  function render() { gl.uniform1f(uPhase, phase * Math.PI * 2); gl.drawArrays(gl.TRIANGLES, 0, 3); }
+  function frame(t) {
+    raf = requestAnimationFrame(frame);
+    if (!lastT) lastT = t;
+    var dt = Math.min(t - lastT, 100); lastT = t;         // clamp so a tab switch never jumps the loop
+    phase = (phase + dt * speed / CYCLE) % 1;
+    render();
+  }
+  function start() { if (!raf) { lastT = 0; raf = requestAnimationFrame(frame); } }
+  function stop()  { if (raf) { cancelAnimationFrame(raf); raf = 0; } }
+  window.addEventListener('resize', function () { resize(); render(); });
+  document.addEventListener('visibilitychange', function () { document.hidden ? stop() : start(); });
+
+  resize();
+  render();
+  if (!document.hidden) start();
+})();
+</script>
+</body>
+</html>

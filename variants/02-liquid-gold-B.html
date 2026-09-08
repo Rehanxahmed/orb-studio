@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Orb — 02 Liquid Gold (B · metaball glass)</title>
+<!--
+  Liquid Gold B — metaball glass. WebGL1 fragment shader: 7 inverse-square field sources (gold / peach) drift on slow
+  Lissajous paths that are integer harmonics of one 40 s loop, merge with liquid necks where the summed field crosses a
+  threshold (AA'd with fwidth), and are lit as glossy beads from the field's analytic gradient (honey limb, near-white
+  cores, top-left specular). The field is sampled through a sphere lens, over the reference cream body with in-shader
+  limb/highlight shading. CSS adds only the crisp 1px rim + inset foot shadow; halo, rings and the outer glow are the shell's.
+-->
+<style>
+  /* ---- shared framing: DO NOT change geometry/colors of the halo & rings unless the brief says so ---- */
+  :root { --R: min(17vw, 9vh); }            /* orb radius → diameter 34vw on a phone (≈132px @390) */
+  html, body { margin: 0; height: 100%; overflow: hidden; }
+  body { background: #dcd6ea url(../assets/claude-bg.png) center 44% / cover no-repeat; }
+  .stage { position: absolute; left: 50%; top: 44%; width: 0; height: 0; }
+  .stage > * { position: absolute; left: 0; top: 0; transform: translate(-50%, -50%); border-radius: 50%; }
+  .halo { width: calc(var(--R) * 5.2); height: calc(var(--R) * 5.2); pointer-events: none;
+          background: radial-gradient(circle, rgba(253,232,170,.62) 0%, rgba(253,232,170,.34) 22%, rgba(253,232,170,.12) 42%, rgba(253,232,170,0) 62%); }
+  .ring { pointer-events: none; border: 1px solid rgba(255,255,255,.40); }
+  .r1 { width: calc(var(--R) * 3.5); height: calc(var(--R) * 3.5); }
+  .r2 { width: calc(var(--R) * 5.0); height: calc(var(--R) * 5.0); border-color: rgba(255,255,255,.32); }
+  .r3 { width: calc(var(--R) * 6.6); height: calc(var(--R) * 6.6); border-color: rgba(255,255,255,.24); }
+  .orb { width: calc(var(--R) * 2); height: calc(var(--R) * 2); overflow: hidden;
+         /* reference body doubles as the no-WebGL fallback */
+         background: radial-gradient(circle at 38% 32%, #fffdf3 0%, #fff8dd 28%, #fbeebd 60%, #f3dfa2 100%);
+         box-shadow: 0 0 40px 6px rgba(246,214,130,.45), 0 0 90px 20px rgba(246,214,130,.22); }
+  .orb canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  /* crisp glass rim + a soft warm foot; everything else is painted by the shader */
+  .shade { position: absolute; inset: 0; border-radius: 50%; pointer-events: none;
+           box-shadow: inset 0 0 0 1px rgba(255,255,255,.60), inset 0 -6px 14px rgba(232,190,110,.26),
+                       inset 0 0 5px 1px rgba(255,252,240,.30); }
+</style>
+</head>
+<body>
+  <div class="stage">
+    <div class="halo"></div>
+    <div class="ring r3"></div><div class="ring r2"></div><div class="ring r1"></div>
+    <div class="orb">
+      <canvas id="c"></canvas>
+      <div class="shade"></div>
+    </div>
+  </div>
+
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('c');
+  var gl = canvas.getContext('webgl', { alpha: true, antialias: false, premultipliedAlpha: true, preserveDrawingBuffer: false })
+        || canvas.getContext('experimental-webgl', { alpha: true, antialias: false });
+  if (!gl) { canvas.style.display = 'none'; return; }          // CSS body stays as the fallback
+
+  var hasDeriv = !!gl.getExtension('OES_standard_derivatives');
+  var N = 7;                                                    // field sources (compile-time constant in the shader)
+
+  var VS = 'attribute vec2 a;void main(){gl_Position=vec4(a,0.,1.);}';
+  var FS = (hasDeriv ? '#extension GL_OES_standard_derivatives : enable\n' : '') +
+  'precision mediump float;\n' +
+  'uniform vec2 u_res;uniform vec3 u_s[7];uniform vec3 u_c[7];\n' +
+  'const vec3 BODY=vec3(1.000,.973,.867);' +          /* #FFF8DD cream core            */
+  'const vec3 MID =vec3(.984,.933,.741);' +           /* #FBEEBD reference mid          */
+  'const vec3 EDGE=vec3(.953,.875,.635);' +           /* #F3DFA2 reference edge         */
+  'const vec3 LIMB=vec3(.910,.800,.510);' +           /* a touch deeper gold at the limb */
+  'const vec3 HI  =vec3(1.000,.992,.953);' +          /* #FFFDF3 highlight / bead cores  */
+  'const vec3 HONEY=vec3(.910,.725,.415);\n' +        /* #E8B96A honey (bead limbs only) */
+  'float hash(vec2 p){return fract(sin(dot(p,vec2(12.9898,78.233)))*43758.5453);}\n' +
+  'void main(){\n' +
+  '  vec2 p=(gl_FragCoord.xy/u_res)*2.-1.; p.y=-p.y;\n' +                    /* +y down, orb radius = 1 */
+  '  float r=length(p); float r2=min(r*r,1.);\n' +
+  '  float nz=sqrt(1.-r2);\n' +                                              /* sphere normal z */
+  '  vec2 q=p*(1.-.24*(1.-nz));\n' +                                         /* glass lens: contents magnified toward the limb */
+  /* ---- metaball field, analytic gradient, field-weighted colour ---- */
+  '  float f=0.; vec2 g=vec2(0.); vec3 wc=vec3(0.);\n' +
+  '  for(int i=0;i<7;i++){ vec2 d=q-u_s[i].xy; float dd=dot(d,d)+.0016; float s2=u_s[i].z*u_s[i].z;\n' +
+  '    float fi=s2/dd; f+=fi; g+=-2.*s2*d/(dd*dd); wc+=fi*u_c[i]; }\n' +
+  '  wc/=max(f,1e-4);\n' +
+  '  f*=smoothstep(1.18,.80,r);\n' +                                          /* liquid thins toward the glass wall */
+  /* ---- edge: ~3px smoothstep on the threshold, then a wide soft glow ---- */
+  '  float T=1.;\n' +
+  (hasDeriv ? '  float aa=max(fwidth(f)*1.5,.02);\n' : '  float aa=.12;\n') +
+  '  float m=smoothstep(T-aa,T+aa,f);\n' +
+  '  float glow=smoothstep(.30*T,T,f); glow=glow*glow*(3.-2.*glow);\n' +
+  /* ---- cream body with sphere shading (interpolated in the warm palette, never multiplied) ---- */
+  '  vec3 body=mix(BODY,MID,smoothstep(.15,.80,r));\n' +
+  '  body=mix(body,EDGE,smoothstep(.62,1.00,r));\n' +
+  '  body=mix(body,LIMB,smoothstep(.88,1.00,r)*.30);\n' +
+  '  vec3 col=mix(body,mix(wc,BODY,.35),glow*.55);\n' +                         /* soft luminous halo around the liquid */
+  /* ---- glossy liquid beads ---- */
+  '  vec3 n=normalize(vec3(-g*.16,1.));\n' +                                  /* field gradient → bead normal */
+  '  float fres=pow(1.-n.z,1.6);\n' +
+  '  float depth=smoothstep(1.5*T,4.5*T,f);\n' +                                  /* deep field → bright core */
+  '  vec3 bead=mix(wc,HONEY,fres*.42);\n' +                                   /* honey limb on each bead */
+  '  bead=mix(bead,HI,depth*.70);\n' +
+  '  vec3 L=normalize(vec3(-.55,-.62,.56));\n' +
+  '  float spec=pow(max(dot(n,L),0.),22.)*.55*(1.-depth*.6);\n' +
+  '  float back=pow(max(dot(n,normalize(vec3(.5,.62,.6))),0.),10.)*.16;\n' +   /* faint bounce on the lower-right of beads */
+  '  bead=mix(bead,HI,spec); bead=mix(bead,MID,back);\n' +
+  '  col=mix(col,bead,m);\n' +
+  /* ---- glass sphere over everything: top-left highlight, deeper gold limb ---- */
+  '  vec2 hp=p-vec2(-.34,-.40); float h=exp(-dot(hp,hp)*3.6);\n' +
+  '  col=mix(col,HI,h*.70);\n' +
+  '  float limb=smoothstep(.70,1.0,r);\n' +
+  '  col=mix(col,mix(EDGE,LIMB,.5),limb*limb*.40);\n' +
+  '  vec2 sp=p-vec2(-.30,-.34); col=mix(col,HI,exp(-dot(sp,sp)*22.)*.35);\n' + /* small specular kernel */
+  '  col+=(hash(gl_FragCoord.xy)-.5)/255.;\n' +                                /* whisper dither against banding */
+  '  float alpha=1.-smoothstep(.985,1.0,r);\n' +
+  '  gl_FragColor=vec4(col*alpha,alpha);\n' +
+  '}';
+
+  function compile(type, src) {
+    var s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) { gl.deleteShader(s); return null; }
+    return s;
+  }
+  var vs = compile(gl.VERTEX_SHADER, VS), fs = compile(gl.FRAGMENT_SHADER, FS);
+  if (!vs || !fs) { canvas.style.display = 'none'; return; }
+  var prog = gl.createProgram(); gl.attachShader(prog, vs); gl.attachShader(prog, fs); gl.linkProgram(prog);
+  if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) { canvas.style.display = 'none'; return; }
+  gl.useProgram(prog);
+  var buf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+  var loc = gl.getAttribLocation(prog, 'a'); gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+  var uRes = gl.getUniformLocation(prog, 'u_res'), uS = gl.getUniformLocation(prog, 'u_s'), uC = gl.getUniformLocation(prog, 'u_c');
+
+  /* Sources: Lissajous paths in orb radii. kx/ky are harmonics of one LOOP so the motion is seamless; s = field radius
+     (a lone source shows as a bead of about that radius), breathing by `pulse` so necks form and snap. Colours: gold and
+     peach only — cream body + HI cores come from the shader. */
+  var LOOP = 40, TAU = Math.PI * 2;
+  var GOLD = [.937, .812, .494], PEACH = [.973, .851, .722], GOLD2 = [.949, .831, .545], PEACH2 = [.980, .878, .765];
+  var src = [
+    { c: GOLD,   s: .22, ax: .42, ay: .30, kx: 2, ky: 3, px: 0.0, py: 1.9, ox: -.02, oy: .02, pulse: .12, pk: 5 },
+    { c: PEACH,  s: .14, ax: .36, ay: .40, kx: 3, ky: 2, px: 2.1, py: 0.6, ox: .04, oy: -.04, pulse: .10, pk: 4 },
+    { c: GOLD2,  s: .17, ax: .44, ay: .34, kx: 1, ky: 4, px: 4.0, py: 2.8, ox: 0, oy: .06, pulse: .14, pk: 6 },
+    { c: PEACH2, s: .16, ax: .32, ay: .44, kx: 4, ky: 1, px: 1.2, py: 4.4, ox: -.06, oy: 0, pulse: .12, pk: 3 },
+    { c: GOLD,   s: .15, ax: .38, ay: .26, kx: 2, ky: 5, px: 5.3, py: 1.1, ox: .08, oy: .10, pulse: .16, pk: 7 },
+    { c: PEACH,  s: .14, ax: .26, ay: .36, kx: 5, ky: 2, px: 3.3, py: 0.2, ox: -.10, oy: -.08, pulse: .14, pk: 5 },
+    { c: GOLD2,  s: .13, ax: .30, ay: .30, kx: 3, ky: 4, px: 0.8, py: 3.5, ox: .12, oy: -.12, pulse: .18, pk: 8 }
+  ];
+  var cols = new Float32Array(N * 3);
+  for (var i = 0; i < N; i++) { cols[i * 3] = src[i].c[0]; cols[i * 3 + 1] = src[i].c[1]; cols[i * 3 + 2] = src[i].c[2]; }
+  gl.uniform3fv(uC, cols);
+  var sv = new Float32Array(N * 3);
+
+  var W = 0, H = 0;
+  function resize() {
+    var dpr = Math.min(window.devicePixelRatio || 1, 2);
+    var rect = canvas.getBoundingClientRect();
+    var w = Math.max(1, Math.round(rect.width * dpr)), h = Math.max(1, Math.round(rect.height * dpr));
+    if (w !== W || h !== H) { W = canvas.width = w; H = canvas.height = h; gl.viewport(0, 0, W, H); gl.uniform2f(uRes, W, H); }
+  }
+
+  function draw(t) {
+    var rot = Math.sin(TAU * t / LOOP) * 0.5, cr = Math.cos(rot), sr = Math.sin(rot);   // whole field slowly sways
+    for (var i = 0; i < N; i++) {
+      var b = src[i];
+      var x = b.ox + b.ax * Math.sin(TAU * b.kx * t / LOOP + b.px);
+      var y = b.oy + b.ay * Math.sin(TAU * b.ky * t / LOOP + b.py);
+      sv[i * 3]     = x * cr - y * sr;
+      sv[i * 3 + 1] = x * sr + y * cr;
+      sv[i * 3 + 2] = b.s * (1 + b.pulse * Math.sin(TAU * b.pk * t / LOOP + b.px * 1.7));
+    }
+    gl.uniform3fv(uS, sv);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+  }
+
+  var reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var speed = reduced ? 0.2 : 1;                       // reduced motion: 5× slower, never frozen
+  var raf = 0, last = 0, tAcc = 0;
+  function frame(now) {
+    if (!last) last = now;
+    tAcc += Math.min(now - last, 100) / 1000 * speed;  // accumulate so hidden/paused time never jumps the loop
+    last = now;
+    draw(tAcc);
+    raf = requestAnimationFrame(frame);
+  }
+  function start() { if (!raf) { last = 0; raf = requestAnimationFrame(frame); } }
+  function stop()  { if (raf) { cancelAnimationFrame(raf); raf = 0; } }
+
+  window.addEventListener('resize', function () { resize(); draw(tAcc); });
+  document.addEventListener('visibilitychange', function () { document.hidden ? stop() : start(); });
+  if (window.matchMedia) {
+    var mq = window.matchMedia('(prefers-reduced-motion: reduce)');
+    var onMq = function (e) { speed = e.matches ? 0.2 : 1; };
+    if (mq.addEventListener) mq.addEventListener('change', onMq); else if (mq.addListener) mq.addListener(onMq);
+  }
+
+  resize();
+  draw(0);
+  if (!document.hidden) start();
+})();
+</script>
+</body>
+</html>

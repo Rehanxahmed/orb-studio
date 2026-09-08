@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Orb variants</title>
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: #efedf4; color: #2b2740; font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", Inter, system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+  header { display: flex; align-items: baseline; gap: 14px; padding: 26px 32px 6px; }
+  h1 { margin: 0; font-size: 17px; font-weight: 600; letter-spacing: -0.01em; }
+  header p { margin: 0; font-size: 13px; color: #7d7894; }
+  header p kbd { font: inherit; padding: 1px 6px; border-radius: 6px; background: #e3e0ec; color: #5a5570; }
+  h2 { margin: 26px 32px 0; font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: #8b86a3; }
+  h2 small { font-weight: 500; letter-spacing: 0; text-transform: none; color: #a09bb5; margin-left: 8px; }
+  .grid { display: flex; flex-wrap: wrap; justify-content: center; gap: 22px 20px; padding: 14px 32px 18px; }
+  .card { width: var(--w); flex: 0 0 auto; }
+  .frame { position: relative; width: var(--w); height: calc(var(--w) * 844 / 390); overflow: hidden; cursor: zoom-in;
+           border-radius: calc(var(--w) * 0.115); background: #dcd6ea;
+           box-shadow: 0 0 0 1px rgba(58, 50, 100, .10), 0 24px 48px -24px rgba(58, 50, 100, .45), 0 2px 6px rgba(58, 50, 100, .06); }
+  .frame iframe { position: absolute; left: 0; top: 0; width: 390px; height: 844px; border: 0; transform-origin: 0 0; pointer-events: none; }
+  .meta { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; padding: 11px 2px 0; }
+  .meta b { display: block; font-size: 13.5px; font-weight: 600; }
+  .meta span { display: block; margin-top: 2px; font-size: 12px; line-height: 1.35; color: #7d7894; }
+  .meta em { display: inline-block; margin-top: 5px; padding: 2px 7px; border-radius: 999px; font-style: normal; font-size: 10.5px; font-weight: 600; letter-spacing: .02em; text-transform: uppercase; color: #6b5a2c; background: #f5e7bf; }
+  .meta a { flex: 0 0 auto; margin-top: 1px; font-size: 12px; color: #6a63a8; text-decoration: none; }
+  .meta a:hover { text-decoration: underline; }
+  .explore .card { width: var(--ws); }
+  .explore .frame { width: var(--ws); height: calc(var(--ws) * 844 / 390); border-radius: calc(var(--ws) * 0.115); }
+  .explore .meta b { font-size: 12.5px; }
+  .explore .meta span { font-size: 11.5px; }
+
+  /* lightbox: one variant at full phone size */
+  .lightbox { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(20, 16, 40, .55); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); z-index: 10; }
+  .lightbox.open { display: flex; }
+  .lightbox .big { position: relative; height: min(844px, calc(100vh - 48px)); aspect-ratio: 390 / 844; overflow: hidden; border-radius: 46px; background: #dcd6ea; box-shadow: 0 40px 100px -30px rgba(0, 0, 0, .6), 0 0 0 1px rgba(255, 255, 255, .15); }
+  .lightbox .big iframe { position: absolute; left: 0; top: 0; width: 390px; height: 844px; border: 0; transform-origin: 0 0; }
+  .lightbox .cap { position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); color: rgba(255, 255, 255, .8); font-size: 13px; white-space: nowrap; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Orb variants</h1>
+  <p>Syncing-state orbs over the Claude background · click a phone for full size (<kbd>esc</kbd> closes) · <a href="./" style="color:#6a63a8">← back to the studio</a></p>
+</header>
+
+<h2>Finals</h2>
+<div class="grid" id="finals"></div>
+
+<h2>Explorations <small>three directions each, judged side by side — the winner became the final above</small></h2>
+<div class="grid explore" id="explore"></div>
+
+<div class="lightbox" id="lightbox">
+  <div class="big" id="big"></div>
+  <div class="cap" id="cap"></div>
+</div>
+
+<script>
+  const FINALS = [
+    { file: '01-aurora.html',      tune: true, name: '01 · Aurora Bloom', desc: 'Silk ribbons of gold and peach flowing through a cream sphere (WebGL).' },
+    { file: '02-liquid-gold.html', tune: true, name: '02 · Liquid Gold',  desc: 'Heavy honey blobs drifting under a glossy, deep-shaded sphere.' },
+  ];
+  const EXPLORE = [
+    { file: '01-aurora-A.html',      name: '01 · A — Silk ribbons',        desc: 'Large luminous gold and peach bands flowing on a diagonal.' },
+    { file: '01-aurora-B.html',      name: '01 · B — Inner sun',           desc: 'A drifting core light with warped gold caustic veils.' },
+    { file: '01-aurora-C.html',      name: '01 · C — Frosted aurora',      desc: 'Bigger-scale warped noise, higher cream-to-gold contrast.' },
+    { file: '02-liquid-gold-A.html', name: '02 · A — Honey mesh, refined', desc: 'Fewer, softer blobs with deeper sphere shading.' },
+    { file: '02-liquid-gold-B.html', name: '02 · B — Metaball glass',      desc: 'True metaballs merging with liquid necks.' },
+    { file: '02-liquid-gold-C.html', name: '02 · C — Mesh-gradient drift', desc: 'A silk-smooth animated mesh gradient in WebGL.' },
+  ];
+
+  function makeCards(list, mount) {
+    list.forEach(v => {
+      const card = document.createElement('div'); card.className = 'card';
+      card.innerHTML = `
+        <div class="frame"><iframe src="variants/${v.file}" title="${v.name}" loading="eager"></iframe></div>
+        <div class="meta">
+          <div><b>${v.name}</b><span>${v.desc}</span>${v.distort ? '<em>shape distortion</em>' : ''}</div>
+          <a href="variants/${v.file}" target="_blank" rel="noopener">${v.tune ? "Tune ↗" : "Open ↗"}</a>
+        </div>`;
+      card.querySelector('.frame').addEventListener('click', () => openBig(v));
+      mount.appendChild(card);
+    });
+  }
+  makeCards(FINALS, document.getElementById('finals'));
+  makeCards(EXPLORE, document.getElementById('explore'));
+
+  // Finals: two large phones side by side. Explorations: six smaller ones in a row when the window allows.
+  function layout() {
+    const avail = window.innerWidth - 64;
+    let w = Math.min(320, Math.floor((avail - 20) / 2));
+    w = Math.max(200, Math.min(w, Math.floor((window.innerHeight - 170) * 390 / 844)));
+    let ws = Math.floor((avail - 5 * 20) / 6);
+    if (ws < 150) ws = Math.floor((avail - 2 * 20) / 3);
+    ws = Math.max(130, Math.min(ws, 240));
+    const root = document.documentElement.style;
+    root.setProperty('--w', w + 'px'); root.setProperty('--ws', ws + 'px');
+    document.querySelectorAll('#finals .frame iframe').forEach(f => f.style.transform = `scale(${w / 390})`);
+    document.querySelectorAll('#explore .frame iframe').forEach(f => f.style.transform = `scale(${ws / 390})`);
+    const big = document.getElementById('big');
+    big.querySelectorAll('iframe').forEach(f => f.style.transform = `scale(${big.clientHeight / 844})`);
+  }
+  window.addEventListener('resize', layout);
+  layout();
+
+  const lightbox = document.getElementById('lightbox');
+  const big = document.getElementById('big');
+  const cap = document.getElementById('cap');
+  function openBig(v) {
+    big.innerHTML = `<iframe src="variants/${v.file}" title="${v.name}"></iframe>`;
+    cap.textContent = v.name + ' — ' + v.desc;
+    lightbox.classList.add('open');
+    layout();
+  }
+  function closeBig() { lightbox.classList.remove('open'); big.innerHTML = ''; }
+  lightbox.addEventListener('click', e => { if (e.target === lightbox) closeBig(); });
+  window.addEventListener('keydown', e => { if (e.key === 'Escape') closeBig(); });
+</script>
+</body>
+</html>
