@@ -27,7 +27,7 @@
   .scene { position: absolute; inset: 0; overflow: hidden; background: #dcd6ea url(../assets/claude-bg.png) center 44% / cover no-repeat; }
   .stage { position: absolute; left: 50%; top: 44%; width: 0; height: 0; }
   .stage > * { position: absolute; left: 0; top: 0; transform: translate(-50%, -50%); border-radius: 50%; }
-  .halo { width: calc(var(--R) * var(--halo-size)); height: calc(var(--R) * var(--halo-size)); background: var(--halo-bg); pointer-events: none; }
+  .halo { width: calc(var(--R) * var(--halo-size)); height: calc(var(--R) * var(--halo-size)); background: var(--halo-bg); pointer-events: none; transform: translate(-50%, -50%) scale(var(--halo-scale, 1)); opacity: var(--halo-op, 1); }
   .ring { pointer-events: none; display: var(--rings-display); border: var(--ring-w) solid var(--ring-1); }
   .r1 { width: calc(var(--R) * 3.5 * var(--ring-sp)); height: calc(var(--R) * 3.5 * var(--ring-sp)); }
   .r2 { width: calc(var(--R) * 5.0 * var(--ring-sp)); height: calc(var(--R) * 5.0 * var(--ring-sp)); border-color: var(--ring-2); }
@@ -66,7 +66,7 @@
   var W = 0, H = 0, GW = 0, GH = 0, dpr = 1;
   var TAU = Math.PI * 2;
   var reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  var speed = reduced ? 0.2 : 1;
+  var speed = reduced ? 0.5 : 1;
 
   // Blob motion: positions in orb radii relative to the centre; kx/ky harmonic numbers (period = LOOP/k), ax/ay travel,
   // rad radius, pulse breathing, sq ellipse squash. Colors/alphas come from the panel (see apply()).
@@ -177,6 +177,7 @@
     if (!(P && P.paused)) tAcc += Math.min(now - last, 100) / 1000 * speed;
     last = now;
     draw(tAcc);
+    if (P) { var ph = Math.sin(TAU * tAcc / P.loop * 2); document.documentElement.style.setProperty('--halo-scale', (1 + 0.06 * P.haloBreath * ph).toFixed(4)); document.documentElement.style.setProperty('--halo-op', (1 - 0.18 * P.haloBreath * (0.5 - 0.5 * ph)).toFixed(4)); }
     raf = requestAnimationFrame(frame);
   }
   function start() { if (!raf) { last = 0; raf = requestAnimationFrame(frame); } }
@@ -185,21 +186,22 @@
   document.addEventListener('visibilitychange', function () { document.hidden ? stop() : start(); });
   if (window.matchMedia) {
     var mq = window.matchMedia('(prefers-reduced-motion: reduce)');
-    var onMq = function (e) { speed = e.matches ? 0.2 : 1; };
+    var onMq = function (e) { speed = e.matches ? 0.5 : 1; };
     if (mq.addEventListener) mq.addEventListener('change', onMq); else if (mq.addListener) mq.addListener(onMq);
   }
 
   OrbPanel.create({
-    id: '02-liquid-gold-v2', title: 'Liquid Gold',
+    id: '02-liquid-gold-v3', title: 'Liquid Gold',
     groups: [
       { name: 'Animation', controls: [
-        { key: 'loop', label: 'Loop length', type: 'range', min: 10, max: 120, step: 1, value: 42, unit: 's' },
-        { key: 'swing', label: 'Field swing', type: 'range', min: 0, max: 1, step: 0.01, value: 0.40 } ] },
+        { key: 'loop', label: 'Loop length', type: 'range', min: 10, max: 120, step: 1, value: 24, unit: 's' },
+        { key: 'swing', label: 'Field swing', type: 'range', min: 0, max: 1, step: 0.01, value: 0.40 },
+          { key: 'haloBreath', label: 'Halo breath', type: 'range', min: 0, max: 1, step: 0.01, value: 0.35 } ] },
       { name: 'Liquid', controls: [
-        { key: 'blur', label: 'Blur', type: 'range', min: 0, max: 0.4, step: 0.005, value: 0.15, unit: '×R' },
+        { key: 'blur', label: 'Blur', type: 'range', min: 0, max: 0.4, step: 0.005, value: 0.11, unit: '×R' },
         { key: 'blobSize', label: 'Blob size', type: 'range', min: 0.5, max: 1.6, step: 0.01, value: 1, unit: '×' },
         { key: 'travel', label: 'Travel', type: 'range', min: 0, max: 1.6, step: 0.01, value: 1, unit: '×' },
-        { key: 'opacity', label: 'Blob opacity', type: 'range', min: 0.3, max: 1.2, step: 0.01, value: 0.85, unit: '×' },
+        { key: 'opacity', label: 'Blob opacity', type: 'range', min: 0.3, max: 1.2, step: 0.01, value: 1, unit: '×' },
         { key: 'honeyAmt', label: 'Honey accent', type: 'range', min: 0, max: 0.8, step: 0.01, value: 0 },
         { key: 'lavenderAmt', label: 'Lavender whisper', type: 'range', min: 0, max: 0.8, step: 0.01, value: 0.18 } ] },
       { name: 'Sphere shading', controls: [
@@ -208,14 +210,14 @@
         { key: 'limb', label: 'Gold limb', type: 'range', min: 0, max: 1.2, step: 0.01, value: 0.3 },
         { key: 'limbStart', label: 'Limb start', type: 'range', min: 0.3, max: 0.8, step: 0.01, value: 0.66 },
         { key: 'limbColor', label: 'Limb color', type: 'color', value: '#eed9a4' },
-        { key: 'gloss', label: 'Specular', type: 'range', min: 0, max: 1, step: 0.01, value: 0.45 },
+        { key: 'gloss', label: 'Specular', type: 'range', min: 0, max: 1, step: 0.01, value: 0.55 },
         { key: 'glossSize', label: 'Specular size', type: 'range', min: 0.1, max: 0.6, step: 0.01, value: 0.45 } ] },
       { name: 'Colors', controls: [
         { key: 'base', label: 'Base', type: 'color', value: '#fff8e4' },
-        { key: 'gold', label: 'Gold', type: 'color', value: '#f8e3b2' },
+        { key: 'gold', label: 'Gold', type: 'color', value: '#f3d79c' },
         { key: 'cream', label: 'Cream', type: 'color', value: '#fff8e2' },
-        { key: 'peach', label: 'Peach', type: 'color', value: '#fae4cc' },
-        { key: 'warmGold', label: 'Warm gold', type: 'color', value: '#f4dca4' },
+        { key: 'peach', label: 'Peach', type: 'color', value: '#f8dfc2' },
+        { key: 'warmGold', label: 'Warm gold', type: 'color', value: '#f0d497' },
         { key: 'brightCream', label: 'Bright cream', type: 'color', value: '#fffdf4' },
         { key: 'lavender', label: 'Lavender', type: 'color', value: '#f3e9f2' },
         { key: 'honey', label: 'Honey', type: 'color', value: '#efd39a' } ] }

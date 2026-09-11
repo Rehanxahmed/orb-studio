@@ -108,7 +108,7 @@
   }
   .orbstage { position: absolute; left: 50%; top: 44%; width: 0; height: 0; }
   .orbstage > * { position: absolute; left: 0; top: 0; transform: translate(-50%, -50%); border-radius: 50%; }
-  .halo { width: calc(var(--R) * var(--halo-size)); height: calc(var(--R) * var(--halo-size)); background: var(--halo-bg); pointer-events: none; }
+  .halo { width: calc(var(--R) * var(--halo-size)); height: calc(var(--R) * var(--halo-size)); background: var(--halo-bg); pointer-events: none; transform: translate(-50%, -50%) scale(var(--halo-scale, 1)); opacity: var(--halo-op, 1); }
   .ring { pointer-events: none; display: var(--rings-display); border: var(--ring-w) solid var(--ring-1); }
   .r1 { width: calc(var(--R) * 3.5 * var(--ring-sp)); height: calc(var(--R) * 3.5 * var(--ring-sp)); }
   .r2 { width: calc(var(--R) * 5.0 * var(--ring-sp)); height: calc(var(--R) * 5.0 * var(--ring-sp)); border-color: var(--ring-2); }
@@ -216,8 +216,8 @@
   var root = document.documentElement, rs = root.style;
   var TAU = Math.PI * 2;
   var reducedMq = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
-  var speed = reducedMq && reducedMq.matches ? 0.2 : 1;
-  if (reducedMq && reducedMq.addEventListener) reducedMq.addEventListener('change', function (e) { speed = e.matches ? 0.2 : 1; });
+  var speed = reducedMq && reducedMq.matches ? 0.5 : 1;
+  if (reducedMq && reducedMq.addEventListener) reducedMq.addEventListener('change', function (e) { speed = e.matches ? 0.5 : 1; });
 
   function hexToRgb(h) { h = (h || '#000000').replace('#', ''); if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2]; var n = parseInt(h, 16); return { r: n >> 16 & 255, g: n >> 8 & 255, b: n & 255 }; }
   function rgba(hex, a) { var c = hexToRgb(hex); return 'rgba(' + c.r + ',' + c.g + ',' + c.b + ',' + Math.max(0, Math.min(1, +a)).toFixed(3) + ')'; }
@@ -347,13 +347,14 @@
       id: 'liquid', title: 'Liquid Gold', desc: 'Heavy honey blobs drifting under a glossy, deep-shaded sphere.',
       groups: [
         { name: 'Animation', controls: [
-          { key: 'loop', label: 'Loop length', type: 'range', min: 10, max: 120, step: 1, value: 42, unit: 's' },
-          { key: 'swing', label: 'Field swing', type: 'range', min: 0, max: 1, step: 0.01, value: 0.40 } ] },
+          { key: 'loop', label: 'Loop length', type: 'range', min: 10, max: 120, step: 1, value: 24, unit: 's' },
+          { key: 'swing', label: 'Field swing', type: 'range', min: 0, max: 1, step: 0.01, value: 0.40 },
+          { key: 'haloBreath', label: 'Halo breath', type: 'range', min: 0, max: 1, step: 0.01, value: 0.35 } ] },
         { name: 'Liquid', controls: [
-          { key: 'blur', label: 'Blur', type: 'range', min: 0, max: 0.4, step: 0.005, value: 0.15, unit: '×R' },
+          { key: 'blur', label: 'Blur', type: 'range', min: 0, max: 0.4, step: 0.005, value: 0.11, unit: '×R' },
           { key: 'blobSize', label: 'Blob size', type: 'range', min: 0.5, max: 1.6, step: 0.01, value: 1, unit: '×' },
           { key: 'travel', label: 'Travel', type: 'range', min: 0, max: 1.6, step: 0.01, value: 1, unit: '×' },
-          { key: 'opacity', label: 'Blob opacity', type: 'range', min: 0.3, max: 1.2, step: 0.01, value: 0.85, unit: '×' },
+          { key: 'opacity', label: 'Blob opacity', type: 'range', min: 0.3, max: 1.2, step: 0.01, value: 1, unit: '×' },
           { key: 'honeyAmt', label: 'Honey accent', type: 'range', min: 0, max: 0.8, step: 0.01, value: 0 },
           { key: 'lavenderAmt', label: 'Lavender whisper', type: 'range', min: 0, max: 0.8, step: 0.01, value: 0.18 } ] },
         { name: 'Sphere shading', controls: [
@@ -362,14 +363,14 @@
           { key: 'limb', label: 'Gold limb', type: 'range', min: 0, max: 1.2, step: 0.01, value: 0.3 },
           { key: 'limbStart', label: 'Limb start', type: 'range', min: 0.3, max: 0.8, step: 0.01, value: 0.66 },
           { key: 'limbColor', label: 'Limb color', type: 'color', value: '#eed9a4' },
-          { key: 'gloss', label: 'Specular', type: 'range', min: 0, max: 1, step: 0.01, value: 0.45 },
+          { key: 'gloss', label: 'Specular', type: 'range', min: 0, max: 1, step: 0.01, value: 0.55 },
           { key: 'glossSize', label: 'Specular size', type: 'range', min: 0.1, max: 0.6, step: 0.01, value: 0.45 } ] },
         { name: 'Colors', controls: [
           { key: 'base', label: 'Base', type: 'color', value: '#fff8e4' },
-          { key: 'gold', label: 'Gold', type: 'color', value: '#f8e3b2' },
+          { key: 'gold', label: 'Gold', type: 'color', value: '#f3d79c' },
           { key: 'cream', label: 'Cream', type: 'color', value: '#fff8e2' },
-          { key: 'peach', label: 'Peach', type: 'color', value: '#fae4cc' },
-          { key: 'warmGold', label: 'Warm gold', type: 'color', value: '#f4dca4' },
+          { key: 'peach', label: 'Peach', type: 'color', value: '#f8dfc2' },
+          { key: 'warmGold', label: 'Warm gold', type: 'color', value: '#f0d497' },
           { key: 'brightCream', label: 'Bright cream', type: 'color', value: '#fffdf4' },
           { key: 'lavender', label: 'Lavender', type: 'color', value: '#f3e9f2' },
           { key: 'honey', label: 'Honey', type: 'color', value: '#efd39a' } ] }
@@ -387,13 +388,19 @@
         resize(); draw();
       },
       resize: function () { resize(); draw(); },
-      frame: function (dt, paused) { if (!paused) t += dt / 1000 * speed; draw(); }
+      frame: function (dt, paused) {
+        if (!paused) t += dt / 1000 * speed;
+        draw();
+        var br = P ? P.haloBreath : 0, ph = Math.sin(TAU * t / (P ? P.loop : 24) * 2);   // two breaths per loop
+        rs.setProperty('--halo-scale', (1 + 0.06 * br * ph).toFixed(4));
+        rs.setProperty('--halo-op', (1 - 0.18 * br * (0.5 - 0.5 * ph)).toFixed(4));
+      }
     };
   }
 
   /* ---------- state ---------- */
   var renderers = { liquid: Liquid() };
-  var STORE = 'orb-studio:v2';
+  var STORE = 'orb-studio:v3';
   var state = { orb: 'liquid', params: {} };
   try { var saved = JSON.parse(localStorage.getItem(STORE) || 'null'); if (saved && saved.params) { state.orb = 'liquid'; state.params = saved.params; } } catch (e) {}
   function defaultsOf(r) { var d = {}; r.groups.forEach(function (g) { g.controls.forEach(function (c) { d[c.key] = c.value; }); }); return d; }
