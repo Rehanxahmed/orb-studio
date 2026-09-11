@@ -67,6 +67,7 @@
   }
 
   * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
   html, body { height: 100%; }
   body { margin: 0; background: var(--ground); color: var(--ink); overflow: hidden;
          font: 13px/1.4 "Instrument Sans", -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif; -webkit-font-smoothing: antialiased;
@@ -155,6 +156,13 @@
   .panel-actions { display: none; gap: 8px; margin-top: 10px; }
   .panel-actions .primary { margin-left: auto; }
 
+  .sheet-back { position: fixed; inset: 0; z-index: 30; display: flex; align-items: center; justify-content: center; padding: 20px; background: rgba(20, 16, 40, .45); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
+  .sheet { width: min(520px, 100%); border-radius: 16px; background: var(--surface-solid); box-shadow: 0 0 0 1px var(--hair), var(--shadow); padding: 18px 18px 14px; display: flex; flex-direction: column; gap: 10px; }
+  .sheet h3 { margin: 0; font-family: "Instrument Serif", Georgia, serif; font-style: italic; font-weight: 400; font-size: 22px; line-height: 1.1; }
+  .sheet p { margin: 0; color: var(--muted); font-size: 12px; }
+  .sheet textarea { width: 100%; min-height: 180px; resize: vertical; font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--hair-strong); background: var(--field); color: var(--ink); }
+  .sheet-actions { display: flex; align-items: center; gap: 8px; }
+  .sheet-note { flex: 1; color: var(--muted); font-size: 11px; }
   .toast { position: fixed; left: 50%; bottom: 22px; transform: translate(-50%, 8px); padding: 8px 14px; border-radius: 10px; background: var(--ink); color: var(--ground); font-size: 12px; opacity: 0; pointer-events: none; transition: opacity .18s, transform .18s; z-index: 20; }
   .toast.show { opacity: 1; transform: translate(-50%, 0); }
   .fab { display: none; position: fixed; right: 16px; bottom: 16px; z-index: 15; padding: 10px 16px; border-radius: 999px; box-shadow: var(--shadow); }
@@ -181,6 +189,7 @@
   <div class="spacer"></div>
   <button type="button" class="btn text" id="pause">Pause</button>
   <button type="button" class="btn text" id="reset">Reset</button>
+  <button type="button" class="btn text" id="paste">Paste settings</button>
   <button type="button" class="btn primary" id="copy">Copy settings</button>
 </header>
 
@@ -200,12 +209,20 @@
     <div class="caption">iPhone preview · 390 × 844</div>
   </section>
   <aside class="panel" id="panel" aria-label="Controls">
-    <div class="panel-head"><h2 id="p-title">Liquid Gold</h2><p id="p-desc"></p><div class="panel-actions"><button type="button" class="btn" id="p-pause">Pause</button><button type="button" class="btn" id="p-reset">Reset</button><button type="button" class="btn primary" id="p-close">Done</button></div></div>
+    <div class="panel-head"><h2 id="p-title">Liquid Gold</h2><p id="p-desc"></p><div class="panel-actions"><button type="button" class="btn" id="p-pause">Pause</button><button type="button" class="btn" id="p-reset">Reset</button><button type="button" class="btn" id="p-paste">Paste</button><button type="button" class="btn primary" id="p-close">Done</button></div></div>
     <div class="panel-body" id="p-body"></div>
     <div class="panel-foot">Changes stay on this device. Copy settings and send them back to hand over a look.</div>
   </aside>
 </main>
 <button type="button" class="btn primary fab" id="fab">Tune</button>
+<div class="sheet-back" id="paste-back" hidden>
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="paste-title">
+    <h3 id="paste-title">Paste settings</h3>
+    <p>Paste the text that Copy settings produced. Only Liquid Gold values are read; anything else is ignored.</p>
+    <textarea id="paste-text" spellcheck="false" placeholder='{ "orb": "Liquid Gold", "settings": { ... } }'></textarea>
+    <div class="sheet-actions"><span class="sheet-note" id="paste-note"></span><button type="button" class="btn" id="paste-cancel">Cancel</button><button type="button" class="btn primary" id="paste-apply">Apply</button></div>
+  </div>
+</div>
 <div class="toast" id="toast" role="status"></div>
 
 
@@ -478,12 +495,53 @@
     if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(s).then(done, function () { window.prompt('Copy these settings:', s); });
     else window.prompt('Copy these settings:', s);
   });
+  /* ---------- paste settings ---------- */
+  function coerce(v, d) {
+    if (typeof d === 'boolean') return !!v;
+    if (typeof d === 'number') { var n = +v; return isFinite(n) ? n : d; }
+    if (typeof d === 'string') { var c = String(v).trim().toLowerCase(); if (c[0] !== '#') c = '#' + c; return /^#[0-9a-f]{6}$/.test(c) ? c : d; }
+    return d;
+  }
+  function applySettingsText(text) {
+    var obj;
+    try { obj = JSON.parse(String(text || '').trim()); } catch (e) { return { ok: false, msg: 'That is not settings text. Paste exactly what Copy settings produced.' }; }
+    var settings = obj && typeof obj === 'object' && obj.settings && typeof obj.settings === 'object' ? obj.settings : obj;
+    if (!settings || typeof settings !== 'object' || Array.isArray(settings)) return { ok: false, msg: 'That is not settings text. Paste exactly what Copy settings produced.' };
+    var d = defaultsOf(active), p = state.params[active.id], applied = 0;
+    Object.keys(settings).forEach(function (k) { if (k in d) { p[k] = coerce(settings[k], d[k]); applied++; } });
+    if (!applied) return { ok: false, msg: 'No ' + active.title + ' values found in that text.' };
+    persist(); buildPanel(active); active.apply(p);
+    return { ok: true, msg: 'Applied ' + applied + ' settings.' };
+  }
+  var pasteBack = $('paste-back'), pasteText = $('paste-text'), pasteNote = $('paste-note');
+  function openPaste() {
+    pasteText.value = ''; pasteNote.textContent = '';
+    pasteBack.hidden = false; pasteText.focus();
+    if (navigator.clipboard && navigator.clipboard.readText) {
+      navigator.clipboard.readText().then(function (t) { if (t && !pasteText.value && /\{/.test(t)) { pasteText.value = t; pasteNote.textContent = 'Read from your clipboard. Check it, then Apply.'; } }, function () {});
+    }
+  }
+  function closePaste() { pasteBack.hidden = true; }
+  $('paste').addEventListener('click', openPaste);
+  $('p-paste').addEventListener('click', openPaste);
+  $('paste-cancel').addEventListener('click', closePaste);
+  pasteBack.addEventListener('click', function (e) { if (e.target === pasteBack) closePaste(); });
+  $('paste-apply').addEventListener('click', function () {
+    var r = applySettingsText(pasteText.value);
+    if (r.ok) { closePaste(); toast(r.msg); } else pasteNote.textContent = r.msg;
+  });
+  document.addEventListener('paste', function (e) {
+    if (/input|textarea/i.test(document.activeElement.tagName)) return;
+    var t = e.clipboardData && e.clipboardData.getData('text'); if (!t) return;
+    var r = applySettingsText(t); toast(r.msg); if (r.ok) e.preventDefault();
+  });
+
   var panel = $('panel'), fab = $('fab');
   fab.addEventListener('click', function () { panel.classList.add('open'); fab.classList.add('hide'); });
   $('stage').addEventListener('click', function () { if (panel.classList.contains('open')) closeDrawer(); });
   function closeDrawer() { panel.classList.remove('open'); fab.classList.remove('hide'); }
   $('p-close').addEventListener('click', closeDrawer);
-  window.addEventListener('keydown', function (e) { if (e.key === 'p' && !/input|textarea/i.test(document.activeElement.tagName)) setPaused(!paused); if (e.key === 'Escape') closeDrawer(); });
+  window.addEventListener('keydown', function (e) { if (e.key === 'p' && !/input|textarea/i.test(document.activeElement.tagName)) setPaused(!paused); if (e.key === 'Escape') { closeDrawer(); closePaste(); } });
 
   /* ---------- layout: fit the phone into the stage ---------- */
   var stage = $('stage');

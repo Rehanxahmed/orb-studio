@@ -122,7 +122,7 @@
 
     var panel = document.createElement('div'); panel.className = 'op-panel';
     var pill = document.createElement('button'); pill.className = 'op-btn op-pill'; pill.textContent = 'Tune ⌃'; document.body.appendChild(pill);
-    panel.innerHTML = '<div class="op-head"><b>' + cfg.title + '</b><button class="op-btn" data-a="pause">Pause</button><button class="op-btn" data-a="copy">Copy</button><button class="op-btn" data-a="reset">Reset</button><button class="op-btn" data-a="hide">×</button></div><div class="op-body"></div><div class="op-foot">Values stick in this browser · press <b>p</b> to toggle · Copy gives JSON to hand back</div>';
+    panel.innerHTML = '<div class="op-head"><b>' + cfg.title + '</b><button class="op-btn" data-a="pause">Pause</button><button class="op-btn" data-a="paste">Paste</button><button class="op-btn" data-a="copy">Copy</button><button class="op-btn" data-a="reset">Reset</button><button class="op-btn" data-a="hide">×</button></div><div class="op-body"></div><div class="op-foot">Values stick in this browser · press <b>p</b> to toggle · Copy gives JSON to hand back</div>';
     var body = panel.querySelector('.op-body');
     var inputs = {};
 
@@ -170,6 +170,15 @@
       if (a === 'hide') show(false);
       if (a === 'reset') { Object.assign(params, defaults); try { localStorage.removeItem(storeKey); } catch (e2) {} Object.keys(inputs).forEach(function (k) { inputs[k](params[k]); }); flush(); }
       if (a === 'copy') { var s = JSON.stringify(params, null, 2); (navigator.clipboard ? navigator.clipboard.writeText(s) : Promise.reject()).then(function () { e.target.textContent = 'Copied'; setTimeout(function () { e.target.textContent = 'Copy'; }, 1200); }, function () { window.prompt('Copy these settings:', s); }); }
+      if (a === 'paste') {
+        var apply = function (t) { var o; try { o = JSON.parse(String(t || '').trim()); } catch (er) { window.alert('That is not settings text. Paste exactly what Copy produced.'); return; }
+          var st = o && o.settings && typeof o.settings === 'object' ? o.settings : o, n = 0;
+          if (st && typeof st === 'object') Object.keys(st).forEach(function (k) { if (k in defaults) { params[k] = st[k]; n++; } });
+          if (!n) { window.alert('No matching values found in that text.'); return; }
+          try { localStorage.setItem(storeKey, JSON.stringify(params)); } catch (er2) {}
+          Object.keys(inputs).forEach(function (k) { inputs[k](params[k]); }); flush(); };
+        var t = window.prompt('Paste the settings text (from Copy):', ''); if (t) apply(t);
+      }
       if (a === 'pause') { params.paused = !params.paused; e.target.textContent = params.paused ? 'Play' : 'Pause'; e.target.classList.toggle('op-on', params.paused); flush(); }
     });
     pill.addEventListener('click', function () { show(true); });
